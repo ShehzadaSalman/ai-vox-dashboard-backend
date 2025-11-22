@@ -1,0 +1,11 @@
+name = "aivox-dashboard-backend"
+main = "src/worker.js"
+compatibility_date = "2024-01-01"
+compatibility_flags = ["nodejs_compat"]
+
+[env.production]
+name = "aivox-dashboard-backend"
+
+[env.production.vars]
+NODE_ENV = "production"
+

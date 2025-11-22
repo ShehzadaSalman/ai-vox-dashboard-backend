@@ -74,10 +74,12 @@ app.use("*", (req, res) => {
 // Error handling middleware (must be last)
 app.use(errorHandler);
 
-// Start server
-app.listen(PORT, () => {
-  logger.info(`Server running on port ${PORT}`);
-  logger.info(`Environment: ${process.env.NODE_ENV || "development"}`);
-});
+// Start server only if not in Cloudflare Workers environment
+if (typeof navigator === "undefined" && typeof EdgeRuntime === "undefined") {
+  app.listen(PORT, () => {
+    logger.info(`Server running on port ${PORT}`);
+    logger.info(`Environment: ${process.env.NODE_ENV || "development"}`);
+  });
+}
 
 export default app;

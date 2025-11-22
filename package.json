@@ -11,7 +11,9 @@
     "db:generate": "prisma generate",
     "db:push": "prisma db push",
     "db:migrate": "prisma migrate dev",
-    "db:studio": "prisma studio"
+    "db:studio": "prisma studio",
+    "deploy": "wrangler deploy",
+    "deploy:pages": "wrangler pages deploy"
   },
   "keywords": [
     "ai",
@@ -36,6 +38,7 @@
     "jsonwebtoken": "^9.0.2"
   },
   "devDependencies": {
-    "nodemon": "^3.0.2"
+    "nodemon": "^3.0.2",
+    "wrangler": "^3.0.0"
   }
 }
