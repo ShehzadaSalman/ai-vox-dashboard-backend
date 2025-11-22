@@ -1,0 +1,41 @@
+{
+  "name": "aivox-dashboard-backend",
+  "version": "1.0.0",
+  "description": "AI Receptionist Dashboard Backend",
+  "type": "module",
+  "main": "src/index.js",
+  "scripts": {
+    "start": "node src/index.js",
+    "dev": "nodemon src/index.js",
+    "test-setup": "node test-setup.js",
+    "db:generate": "prisma generate",
+    "db:push": "prisma db push",
+    "db:migrate": "prisma migrate dev",
+    "db:studio": "prisma studio"
+  },
+  "keywords": [
+    "ai",
+    "receptionist",
+    "dashboard",
+    "backend"
+  ],
+  "author": "",
+  "license": "MIT",
+  "dependencies": {
+    "express": "^4.18.2",
+    "cors": "^2.8.5",
+    "helmet": "^7.1.0",
+    "dotenv": "^16.3.1",
+    "prisma": "^5.7.1",
+    "@prisma/client": "^5.7.1",
+    "axios": "^1.6.2",
+    "joi": "^17.11.0",
+    "winston": "^3.11.0",
+    "express-rate-limit": "^7.1.5",
+    "bcryptjs": "^2.4.3",
+    "jsonwebtoken": "^9.0.2"
+  },
+  "devDependencies": {
+    "nodemon": "^3.0.2"
+  }
+}

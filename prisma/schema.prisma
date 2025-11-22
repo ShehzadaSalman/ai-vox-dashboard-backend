@@ -1,0 +1,70 @@
+generator client {
+  provider = "prisma-client-js"
+}
+
+datasource db {
+  provider = "postgresql"
+  url      = env("DATABASE_URL")
+}
+
+model User {
+  id           String   @id @default(cuid())
+  email        String   @unique
+  passwordHash String
+  name         String?
+  role         UserRole @default(USER)
+  created_at   DateTime @default(now())
+  updated_at   DateTime @updatedAt
+
+  @@map("users")
+}
+
+model Agent {
+  id        String   @id @default(cuid())
+  agent_id  String   @unique
+  agent_name String
+  status    AgentStatus @default(ACTIVE)
+  created_at DateTime @default(now())
+  updated_at DateTime @updatedAt
+
+  // Relations
+  calls     Call[]
+
+  @@map("agents")
+}
+
+model Call {
+  id                  String   @id @default(cuid())
+  agent_id            String
+  call_id             String   @unique
+  caller_info         String?
+  start_timestamp     BigInt
+  end_timestamp       BigInt
+  duration_ms         Int
+  duration_seconds    Int
+  transcript          String?
+  call_status         String
+  disconnection_reason String?
+  cost                Float
+  call_summary        String?
+  user_sentiment      String?
+  call_successful     Boolean
+  recording_url       String?
+  created_at          DateTime @default(now())
+  updated_at          DateTime @updatedAt
+
+  // Relations
+  agent               Agent    @relation(fields: [agent_id], references: [agent_id], onDelete: Cascade)
+
+  @@map("calls")
+}
+
+enum AgentStatus {
+  ACTIVE
+  INACTIVE
+}
+
+enum UserRole {
+  USER
+  ADMIN
+}
