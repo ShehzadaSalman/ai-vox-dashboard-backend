@@ -102,7 +102,7 @@ export const optionalAuthMiddleware = (req, res, next) => {
 
 /**
  * Admin-only middleware
- * Requires user to be authenticated and have ADMIN role
+ * Requires user to be authenticated and have ADMIN or SUPERADMIN role
  */
 export const adminMiddleware = (req, res, next) => {
   try {
@@ -112,13 +112,39 @@ export const adminMiddleware = (req, res, next) => {
     }
 
     // Check if user has ADMIN role
-    if (req.user.role !== "ADMIN") {
+    const adminRoles = new Set(["ADMIN", "SUPERADMIN"]);
+    if (!adminRoles.has(req.user.role)) {
       logger.warn("Admin access denied", {
         userId: req.user.id,
         role: req.user.role,
         url: req.url,
       });
       throw new ForbiddenError("Admin access required");
+    }
+
+    next();
+  } catch (error) {
+    next(error);
+  }
+};
+
+/**
+ * Superadmin-only middleware
+ * Requires user to be authenticated and have SUPERADMIN role
+ */
+export const superAdminMiddleware = (req, res, next) => {
+  try {
+    if (!req.user || !req.user.id) {
+      throw new UnauthorizedError("Authentication required");
+    }
+
+    if (req.user.role !== "SUPERADMIN") {
+      logger.warn("Superadmin access denied", {
+        userId: req.user.id,
+        role: req.user.role,
+        url: req.url,
+      });
+      throw new ForbiddenError("Superadmin access required");
     }
 
     next();

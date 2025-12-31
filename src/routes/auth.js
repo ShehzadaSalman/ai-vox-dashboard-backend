@@ -7,6 +7,7 @@ import {
   asyncHandler,
   ValidationError,
   UnauthorizedError,
+  ForbiddenError,
 } from "../middleware/errorHandler.js";
 
 const router = express.Router();
@@ -70,18 +71,22 @@ router.post(
     // Convert empty string to null for optional name field
     const userName = name && name.trim() ? name.trim() : null;
     const user = await prisma.user.create({
-      data: { email, passwordHash, name: userName },
+      data: { email, passwordHash, name: userName, status: "PENDING" },
       select: {
         id: true,
         email: true,
         name: true,
         role: true,
+        status: true,
         created_at: true,
       },
     });
 
-    const token = signToken({ sub: user.id, role: user.role });
-    res.status(201).json({ success: true, data: user, token });
+    res.status(201).json({
+      success: true,
+      data: user,
+      message: "Your account is pending approval by a superadmin.",
+    });
   })
 );
 
@@ -116,6 +121,10 @@ router.post(
     const valid = await bcrypt.compare(password, user.passwordHash);
     if (!valid) throw new UnauthorizedError("Invalid credentials");
 
+    if (user.status !== "APPROVED") {
+      throw new ForbiddenError("Account pending approval");
+    }
+
     const token = signToken({ sub: user.id, role: user.role });
     res.json({ success: true, token });
   })
@@ -138,6 +147,7 @@ router.get(
           email: true,
           name: true,
           role: true,
+          status: true,
           created_at: true,
         },
       });

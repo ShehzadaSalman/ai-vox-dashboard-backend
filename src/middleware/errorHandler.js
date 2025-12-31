@@ -28,7 +28,7 @@ export const errorHandler = (err, req, res, next) => {
     message = "Unauthorized";
   } else if (err.name === "ForbiddenError") {
     statusCode = 403;
-    message = "Forbidden";
+    message = err.message || "Forbidden";
   } else if (err.name === "NotFoundError") {
     statusCode = 404;
     message = "Not Found";

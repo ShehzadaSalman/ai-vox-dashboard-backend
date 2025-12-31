@@ -8,55 +8,65 @@ datasource db {
 }
 
 model User {
-  id           String   @id @default(cuid())
-  email        String   @unique
+  id           String     @id @default(cuid())
+  email        String     @unique
   passwordHash String
   name         String?
-  role         UserRole @default(USER)
-  created_at   DateTime @default(now())
-  updated_at   DateTime @updatedAt
+  created_at   DateTime   @default(now())
+  updated_at   DateTime   @updatedAt
+  role         UserRole   @default(USER)
+  status       UserStatus @default(APPROVED)
+  assignments  UserAgent[]
 
   @@map("users")
 }
 
 model Agent {
-  id        String   @id @default(cuid())
-  agent_id  String   @unique
+  id         String      @id @default(cuid())
+  agent_id   String      @unique
   agent_name String
-  status    AgentStatus @default(ACTIVE)
-  created_at DateTime @default(now())
-  updated_at DateTime @updatedAt
-
-  // Relations
-  calls     Call[]
+  status     AgentStatus @default(ACTIVE)
+  created_at DateTime    @default(now())
+  updated_at DateTime    @updatedAt
+  calls      Call[]
+  assignments UserAgent[]
 
   @@map("agents")
 }
 
 model Call {
-  id                  String   @id @default(cuid())
-  agent_id            String
-  call_id             String   @unique
-  caller_info         String?
-  start_timestamp     BigInt
-  end_timestamp       BigInt
-  duration_ms         Int
-  duration_seconds    Int
-  transcript          String?
-  call_status         String
+  id                   String   @id @default(cuid())
+  agent_id             String
+  call_id              String   @unique
+  caller_info          String?
+  start_timestamp      BigInt
+  end_timestamp        BigInt
+  duration_ms          Int
+  duration_seconds     Int
+  transcript           String?
+  call_status          String
   disconnection_reason String?
-  cost                Float
-  call_summary        String?
-  user_sentiment      String?
-  call_successful     Boolean
-  recording_url       String?
-  created_at          DateTime @default(now())
-  updated_at          DateTime @updatedAt
-
-  // Relations
-  agent               Agent    @relation(fields: [agent_id], references: [agent_id], onDelete: Cascade)
+  cost                 Float
+  call_summary         String?
+  user_sentiment       String?
+  call_successful      Boolean
+  recording_url        String?
+  created_at           DateTime @default(now())
+  updated_at           DateTime @updatedAt
+  agent                Agent    @relation(fields: [agent_id], references: [agent_id], onDelete: Cascade)
 
   @@map("calls")
+}
+
+model UserAgent {
+  user_id    String
+  agent_id   String
+  created_at DateTime @default(now())
+  user       User     @relation(fields: [user_id], references: [id], onDelete: Cascade)
+  agent      Agent    @relation(fields: [agent_id], references: [agent_id], onDelete: Cascade)
+
+  @@id([user_id, agent_id])
+  @@map("user_agents")
 }
 
 enum AgentStatus {
@@ -67,4 +77,11 @@ enum AgentStatus {
 enum UserRole {
   USER
   ADMIN
+  SUPERADMIN
+}
+
+enum UserStatus {
+  PENDING
+  APPROVED
+  REJECTED
 }

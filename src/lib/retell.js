@@ -1,4 +1,5 @@
 import axios from "axios";
+import Retell from "retell-sdk";
 import { logger } from "./logger.js";
 
 class RetellAPI {
@@ -9,6 +10,8 @@ class RetellAPI {
     if (!this.apiKey) {
       throw new Error("RETELL_API_KEY environment variable is required");
     }
+
+    this.sdk = new Retell({ apiKey: this.apiKey });
 
     this.client = axios.create({
       baseURL: this.baseURL,
@@ -66,17 +69,25 @@ class RetellAPI {
    */
   async getCalls(options = {}) {
     try {
-      const requestBody = {
-        limit: options.limit || 100,
-        ...(options.startAfter && { start_after: options.startAfter }),
-        ...(options.startTimestamp && {
-          start_timestamp: options.startTimestamp,
-        }),
-        ...(options.endTimestamp && { end_timestamp: options.endTimestamp }),
-      };
+      const filterCriteria =
+        options.startTimestamp || options.endTimestamp
+          ? {
+              start_timestamp: {
+                ...(options.startTimestamp && {
+                  lower_threshold: options.startTimestamp,
+                }),
+                ...(options.endTimestamp && {
+                  upper_threshold: options.endTimestamp,
+                }),
+              },
+            }
+          : undefined;
 
-      const response = await this.client.post("/list-calls", requestBody);
-      return response.data;
+      return await this.sdk.call.list({
+        limit: options.limit || 100,
+        ...(options.startAfter && { pagination_key: options.startAfter }),
+        ...(filterCriteria && { filter_criteria: filterCriteria }),
+      });
     } catch (error) {
       logger.error("Failed to fetch calls from Retell API", {
         error: error.message,
@@ -110,27 +121,12 @@ class RetellAPI {
 
     while (hasMore) {
       try {
-        const response = await this.getCalls({
+        const calls = await this.getCalls({
           limit,
           startAfter,
           startTimestamp,
           endTimestamp,
         });
-
-        // Debug: Log the response structure
-        logger.debug("Retell API response structure", {
-          isArray: Array.isArray(response),
-          hasCallsProperty:
-            response && typeof response === "object" && "calls" in response,
-          responseKeys:
-            response && typeof response === "object"
-              ? Object.keys(response)
-              : "N/A",
-          responseLength: Array.isArray(response) ? response.length : "N/A",
-        });
-
-        // The API returns an array directly, not an object with calls property
-        const calls = Array.isArray(response) ? response : response.calls || [];
         allCalls.push(...calls);
 
         // Check if there are more pages
@@ -173,8 +169,7 @@ class RetellAPI {
    */
   async getCallById(callId) {
     try {
-      const response = await this.client.get(`/calls/${callId}`);
-      return response.data;
+      return await this.sdk.call.retrieve(callId);
     } catch (error) {
       logger.error("Failed to fetch call by ID", {
         callId,
@@ -190,8 +185,7 @@ class RetellAPI {
    */
   async getAgents() {
     try {
-      const response = await this.client.get("/agents");
-      return response.data;
+      return await this.sdk.agent.list();
     } catch (error) {
       logger.error("Failed to fetch agents from Retell API", {
         error: error.message,

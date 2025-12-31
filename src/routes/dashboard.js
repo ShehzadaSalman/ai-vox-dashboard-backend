@@ -7,14 +7,44 @@ import {
   asyncHandler,
   ValidationError,
   NotFoundError,
+  ForbiddenError,
 } from "../middleware/errorHandler.js";
-import { adminMiddleware } from "../middleware/auth.js";
+import { adminMiddleware, superAdminMiddleware } from "../middleware/auth.js";
 
 const router = express.Router();
 
+const getAssignedAgentIds = async (userId) => {
+  const assignments = await prisma.userAgent.findMany({
+    where: { user_id: userId },
+    select: { agent_id: true },
+  });
+  return assignments.map((assignment) => assignment.agent_id);
+};
+
+const normalizeRetellAgents = (agents) => {
+  const agentMap = new Map();
+  for (const agent of agents || []) {
+    if (!agent?.agent_id) {
+      continue;
+    }
+    const existing = agentMap.get(agent.agent_id);
+    const candidateTimestamp = agent.last_modification_timestamp || 0;
+    const existingTimestamp = existing?.last_modification_timestamp || 0;
+    const shouldReplace =
+      candidateTimestamp > existingTimestamp ||
+      (candidateTimestamp === existingTimestamp &&
+        agent.is_published &&
+        !existing?.is_published);
+    if (!existing || shouldReplace) {
+      agentMap.set(agent.agent_id, agent);
+    }
+  }
+  return Array.from(agentMap.values());
+};
+
 // Validation schemas
 const syncCallsSchema = Joi.object({
-  days: Joi.number().integer().min(1).max(90).default(30),
+  days: Joi.number().integer().min(1).max(365).default(365),
   agentId: Joi.string().optional(),
 });
 
@@ -62,13 +92,20 @@ const analyticsDateRangeSchema = Joi.object({
 const userListSchema = Joi.object({
   limit: Joi.number().integer().min(1).max(100).default(20),
   offset: Joi.number().integer().min(0).default(0),
-  role: Joi.string().valid("USER", "ADMIN").optional(),
+  role: Joi.string().valid("USER", "ADMIN", "SUPERADMIN").optional(),
+  status: Joi.string().valid("PENDING", "APPROVED", "REJECTED").optional(),
   search: Joi.string().max(200).optional(),
 });
 
 const updateUserSchema = Joi.object({
   name: Joi.string().max(120).optional(),
-  role: Joi.string().valid("USER", "ADMIN").optional(),
+  role: Joi.string().valid("USER", "ADMIN", "SUPERADMIN").optional(),
+  status: Joi.string().valid("PENDING", "APPROVED", "REJECTED").optional(),
+});
+
+const agentAssignmentSchema = Joi.object({
+  userId: Joi.string().required(),
+  agentId: Joi.string().required(),
 });
 
 const searchCallsSchema = Joi.object({
@@ -90,6 +127,7 @@ const searchAgentsSchema = Joi.object({
  */
 router.post(
   "/sync-calls",
+  adminMiddleware,
   asyncHandler(async (req, res) => {
     const { error, value } = syncCallsSchema.validate(req.body);
     if (error) {
@@ -116,7 +154,7 @@ router.post(
       const agentMap = new Map();
 
       try {
-        const agents = await retellAPI.getAgents();
+        const agents = normalizeRetellAgents(await retellAPI.getAgents());
 
         if (agents && agents.length > 0) {
           agents.forEach((agent) => {
@@ -141,6 +179,9 @@ router.post(
 
       // Fetch calls from Retell API
       const calls = await retellAPI.getAllCallsInRange(startDate, endDate);
+      logger.info(
+        `Retell calls response:\n${JSON.stringify(calls, null, 2)}`
+      );
 
       if (!calls || calls.length === 0) {
         return res.json({
@@ -425,9 +466,31 @@ router.get(
     }
 
     const { limit, offset, status, search } = value;
+    const isUserScoped = req.user?.role === "USER";
+    let assignedAgentIds = null;
+    if (isUserScoped) {
+      assignedAgentIds = await getAssignedAgentIds(req.user.id);
+      if (assignedAgentIds.length === 0) {
+        return res.json({
+          success: true,
+          data: {
+            agents: [],
+            pagination: {
+              total: 0,
+              limit,
+              offset,
+              hasMore: false,
+            },
+          },
+        });
+      }
+    }
 
     // Build where clause
     const where = {};
+    if (assignedAgentIds) {
+      where.agent_id = { in: assignedAgentIds };
+    }
     if (status) {
       where.status = status;
     }
@@ -620,7 +683,10 @@ router.post(
     logger.info("Starting agent sync from Retell API");
 
     try {
-      const agents = await retellAPI.getAgents();
+      const agents = normalizeRetellAgents(await retellAPI.getAgents());
+      logger.info(
+        `Retell agents response:\n${JSON.stringify(agents, null, 2)}`
+      );
 
       if (!agents || agents.length === 0) {
         return res.json({
@@ -706,11 +772,32 @@ router.get(
 
     const { limit, offset, agentId, startDate, endDate, callStatus, sortBy } =
       value;
+    const isUserScoped = req.user?.role === "USER";
+    let assignedAgentIds = null;
+    if (isUserScoped) {
+      assignedAgentIds = await getAssignedAgentIds(req.user.id);
+      if (assignedAgentIds.length === 0) {
+        return res.json({
+          success: true,
+          data: {
+            calls: [],
+            pagination: {
+              total: 0,
+              limit,
+              offset,
+              hasMore: false,
+            },
+          },
+        });
+      }
+    }
 
     // Build where clause
     const where = {};
     if (agentId) {
       where.agent_id = agentId;
+    } else if (assignedAgentIds) {
+      where.agent_id = { in: assignedAgentIds };
     }
     if (callStatus) {
       where.call_status = callStatus;
@@ -727,6 +814,9 @@ router.get(
           Math.floor(new Date(endDate).getTime())
         );
       }
+    }
+    if (assignedAgentIds && agentId && !assignedAgentIds.includes(agentId)) {
+      throw new ForbiddenError("Access to agent not permitted");
     }
 
     // Build orderBy clause
@@ -969,11 +1059,34 @@ router.get(
     }
 
     const { startDate, endDate, agentId } = value;
+    const isUserScoped = req.user?.role === "USER";
+    let assignedAgentIds = null;
+    if (isUserScoped) {
+      assignedAgentIds = await getAssignedAgentIds(req.user.id);
+      if (assignedAgentIds.length === 0) {
+        return res.json({
+          success: true,
+          data: {
+            totalCalls: 0,
+            totalCost: 0,
+            avgCost: 0,
+            successfulCalls: 0,
+            successRate: 0,
+            totalAgents: 0,
+            totalDurationSeconds: 0,
+            avgDurationSeconds: 0,
+            callsByStatus: {},
+          },
+        });
+      }
+    }
 
     // Build where clause
     const where = {};
     if (agentId) {
       where.agent_id = agentId;
+    } else if (assignedAgentIds) {
+      where.agent_id = { in: assignedAgentIds };
     }
     if (startDate || endDate) {
       where.start_timestamp = {};
@@ -987,6 +1100,9 @@ router.get(
           Math.floor(new Date(endDate).getTime())
         );
       }
+    }
+    if (assignedAgentIds && agentId && !assignedAgentIds.includes(agentId)) {
+      throw new ForbiddenError("Access to agent not permitted");
     }
 
     const [
@@ -1007,7 +1123,11 @@ router.get(
       }),
       agentId
         ? Promise.resolve(1)
-        : prisma.agent.count({ where: { status: "ACTIVE" } }),
+        : assignedAgentIds
+          ? prisma.agent.count({
+              where: { status: "ACTIVE", agent_id: { in: assignedAgentIds } },
+            })
+          : prisma.agent.count({ where: { status: "ACTIVE" } }),
       prisma.call.aggregate({
         where,
         _sum: { duration_seconds: true },
@@ -1330,12 +1450,15 @@ router.get(
       throw new ValidationError(error.details[0].message);
     }
 
-    const { limit, offset, role, search } = value;
+    const { limit, offset, role, status, search } = value;
 
     // Build where clause
     const where = {};
     if (role) {
       where.role = role;
+    }
+    if (status) {
+      where.status = status;
     }
     if (search) {
       where.OR = [
@@ -1355,6 +1478,7 @@ router.get(
           email: true,
           name: true,
           role: true,
+          status: true,
           created_at: true,
           updated_at: true,
         },
@@ -1398,6 +1522,7 @@ router.get(
         email: true,
         name: true,
         role: true,
+        status: true,
         created_at: true,
         updated_at: true,
       },
@@ -1433,17 +1558,34 @@ router.put(
       throw new ValidationError("User ID is required");
     }
 
-    // Prevent admin from removing their own admin role
-    if (req.user.id === userId && value.role && value.role !== "ADMIN") {
-      throw new ValidationError("Cannot remove your own admin role");
-    }
-
     const existing = await prisma.user.findUnique({
       where: { id: userId },
     });
 
     if (!existing) {
       throw new NotFoundError(`User with ID ${userId} not found`);
+    }
+
+    const isRequesterSuperAdmin = req.user.role === "SUPERADMIN";
+
+    if (existing.role === "SUPERADMIN" && !isRequesterSuperAdmin) {
+      throw new ForbiddenError("Superadmin access required");
+    }
+
+    if (value.role === "SUPERADMIN" && !isRequesterSuperAdmin) {
+      throw new ForbiddenError("Superadmin access required");
+    }
+
+    if (value.status && !isRequesterSuperAdmin) {
+      throw new ForbiddenError("Superadmin access required");
+    }
+
+    if (existing.role === "SUPERADMIN" && value.role && value.role !== "SUPERADMIN") {
+      throw new ValidationError("Cannot remove superadmin role");
+    }
+
+    if (req.user.id === userId && value.role && value.role !== req.user.role) {
+      throw new ValidationError("Cannot change your own role");
     }
 
     const user = await prisma.user.update({
@@ -1463,6 +1605,54 @@ router.put(
       success: true,
       data: user,
     });
+  })
+);
+
+/**
+ * POST /api/dashboard/users/:userId/approve
+ * Approve user (superadmin only)
+ */
+router.post(
+  "/users/:userId/approve",
+  superAdminMiddleware,
+  asyncHandler(async (req, res) => {
+    const { userId } = req.params;
+
+    if (!userId) {
+      throw new ValidationError("User ID is required");
+    }
+
+    const existing = await prisma.user.findUnique({
+      where: { id: userId },
+    });
+
+    if (!existing) {
+      throw new NotFoundError(`User with ID ${userId} not found`);
+    }
+
+    if (existing.status === "APPROVED") {
+      return res.json({
+        success: true,
+        data: {
+          id: existing.id,
+          email: existing.email,
+          status: existing.status,
+        },
+        message: "User is already approved",
+      });
+    }
+
+    const updated = await prisma.user.update({
+      where: { id: userId },
+      data: { status: "APPROVED" },
+      select: {
+        id: true,
+        email: true,
+        status: true,
+      },
+    });
+
+    res.json({ success: true, data: updated });
   })
 );
 
@@ -1493,6 +1683,10 @@ router.delete(
       throw new NotFoundError(`User with ID ${userId} not found`);
     }
 
+    if (existing.role === "SUPERADMIN") {
+      throw new ValidationError("Cannot delete superadmin account");
+    }
+
     await prisma.user.delete({
       where: { id: userId },
     });
@@ -1500,6 +1694,202 @@ router.delete(
     res.json({
       success: true,
       message: "User deleted successfully",
+    });
+  })
+);
+
+// ============================================
+// AGENT ASSIGNMENT APIs (Admin Only)
+// ============================================
+
+/**
+ * POST /api/dashboard/assignments
+ * Assign an agent to a user (admin only)
+ */
+router.post(
+  "/assignments",
+  adminMiddleware,
+  asyncHandler(async (req, res) => {
+    const { error, value } = agentAssignmentSchema.validate(req.body);
+    if (error) {
+      throw new ValidationError(error.details[0].message);
+    }
+
+    const { userId, agentId } = value;
+
+    const [user, agent] = await Promise.all([
+      prisma.user.findUnique({ where: { id: userId }, select: { id: true } }),
+      prisma.agent.findUnique({
+        where: { agent_id: agentId },
+        select: { agent_id: true },
+      }),
+    ]);
+
+    if (!user) {
+      throw new NotFoundError(`User with ID ${userId} not found`);
+    }
+    if (!agent) {
+      throw new NotFoundError(`Agent with ID ${agentId} not found`);
+    }
+
+    const existingAssignment = await prisma.userAgent.findUnique({
+      where: {
+        user_id_agent_id: { user_id: userId, agent_id: agentId },
+      },
+    });
+
+    if (existingAssignment) {
+      throw new ValidationError("Agent is already assigned to this user");
+    }
+
+    const assignment = await prisma.userAgent.create({
+      data: {
+        user_id: userId,
+        agent_id: agentId,
+      },
+      select: {
+        user_id: true,
+        agent_id: true,
+        created_at: true,
+      },
+    });
+
+    res.status(201).json({
+      success: true,
+      data: assignment,
+    });
+  })
+);
+
+/**
+ * DELETE /api/dashboard/assignments
+ * Unassign an agent from a user (admin only)
+ */
+router.delete(
+  "/assignments",
+  adminMiddleware,
+  asyncHandler(async (req, res) => {
+    const { error, value } = agentAssignmentSchema.validate(req.body);
+    if (error) {
+      throw new ValidationError(error.details[0].message);
+    }
+
+    const { userId, agentId } = value;
+
+    const existingAssignment = await prisma.userAgent.findUnique({
+      where: {
+        user_id_agent_id: { user_id: userId, agent_id: agentId },
+      },
+    });
+
+    if (!existingAssignment) {
+      throw new NotFoundError("Assignment not found");
+    }
+
+    await prisma.userAgent.delete({
+      where: {
+        user_id_agent_id: { user_id: userId, agent_id: agentId },
+      },
+    });
+
+    res.json({
+      success: true,
+      message: "Agent unassigned successfully",
+    });
+  })
+);
+
+/**
+ * GET /api/dashboard/users/:userId/agents
+ * List agents assigned to a user (admin only)
+ */
+router.get(
+  "/users/:userId/agents",
+  adminMiddleware,
+  asyncHandler(async (req, res) => {
+    const { userId } = req.params;
+
+    if (!userId) {
+      throw new ValidationError("User ID is required");
+    }
+
+    const user = await prisma.user.findUnique({
+      where: { id: userId },
+      select: { id: true },
+    });
+
+    if (!user) {
+      throw new NotFoundError(`User with ID ${userId} not found`);
+    }
+
+    const assignments = await prisma.userAgent.findMany({
+      where: { user_id: userId },
+      orderBy: { created_at: "desc" },
+      select: {
+        created_at: true,
+        agent: {
+          select: {
+            agent_id: true,
+            agent_name: true,
+            status: true,
+            created_at: true,
+            updated_at: true,
+          },
+        },
+      },
+    });
+
+    res.json({
+      success: true,
+      data: assignments,
+    });
+  })
+);
+
+/**
+ * GET /api/dashboard/agents/:agentId/users
+ * List users assigned to an agent (admin only)
+ */
+router.get(
+  "/agents/:agentId/users",
+  adminMiddleware,
+  asyncHandler(async (req, res) => {
+    const { agentId } = req.params;
+
+    if (!agentId) {
+      throw new ValidationError("Agent ID is required");
+    }
+
+    const agent = await prisma.agent.findUnique({
+      where: { agent_id: agentId },
+      select: { agent_id: true },
+    });
+
+    if (!agent) {
+      throw new NotFoundError(`Agent with ID ${agentId} not found`);
+    }
+
+    const assignments = await prisma.userAgent.findMany({
+      where: { agent_id: agentId },
+      orderBy: { created_at: "desc" },
+      select: {
+        created_at: true,
+        user: {
+          select: {
+            id: true,
+            email: true,
+            name: true,
+            role: true,
+            created_at: true,
+            updated_at: true,
+          },
+        },
+      },
+    });
+
+    res.json({
+      success: true,
+      data: assignments,
     });
   })
 );
@@ -1515,14 +1905,53 @@ router.delete(
 router.get(
   "/stats",
   asyncHandler(async (req, res) => {
+    const isUserScoped = req.user?.role === "USER";
+    let assignedAgentIds = null;
+    if (isUserScoped) {
+      assignedAgentIds = await getAssignedAgentIds(req.user.id);
+      if (assignedAgentIds.length === 0) {
+        return res.json({
+          success: true,
+          data: {
+            agents: {
+              total: 0,
+              active: 0,
+              inactive: 0,
+            },
+            calls: {
+              total: 0,
+            },
+            cost: {
+              total: 0,
+            },
+          },
+        });
+      }
+    }
+
     const [totalAgents, activeAgents, totalCalls, totalCost] = await Promise.all(
       [
-        prisma.agent.count(),
-        prisma.agent.count({ where: { status: "ACTIVE" } }),
-        prisma.call.count(),
-        prisma.call.aggregate({
-          _sum: { cost: true },
-        }),
+        assignedAgentIds
+          ? prisma.agent.count({
+              where: { agent_id: { in: assignedAgentIds } },
+            })
+          : prisma.agent.count(),
+        assignedAgentIds
+          ? prisma.agent.count({
+              where: { status: "ACTIVE", agent_id: { in: assignedAgentIds } },
+            })
+          : prisma.agent.count({ where: { status: "ACTIVE" } }),
+        assignedAgentIds
+          ? prisma.call.count({ where: { agent_id: { in: assignedAgentIds } } })
+          : prisma.call.count(),
+        assignedAgentIds
+          ? prisma.call.aggregate({
+              where: { agent_id: { in: assignedAgentIds } },
+              _sum: { cost: true },
+            })
+          : prisma.call.aggregate({
+              _sum: { cost: true },
+            }),
       ]
     );
 

@@ -339,7 +339,41 @@ Delete user (admin only).
 
 ---
 
-### 5. Utility/Status APIs
+### 5. Agent Assignment APIs (Admin Only)
+
+Assign and manage agent ownership for users.
+
+#### `POST /api/dashboard/assignments`
+Assign an agent to a user.
+
+**Request Body:**
+```json
+{
+  "userId": "user_cuid",
+  "agentId": "agent_123"
+}
+```
+
+#### `DELETE /api/dashboard/assignments`
+Unassign an agent from a user.
+
+**Request Body:**
+```json
+{
+  "userId": "user_cuid",
+  "agentId": "agent_123"
+}
+```
+
+#### `GET /api/dashboard/users/:userId/agents`
+List agents assigned to a user.
+
+#### `GET /api/dashboard/agents/:agentId/users`
+List users assigned to an agent.
+
+---
+
+### 6. Utility/Status APIs
 
 #### `GET /api/dashboard/stats`
 Get quick statistics.
@@ -384,7 +418,7 @@ Get sync status information.
 
 ---
 
-### 6. Search/Filter APIs
+### 7. Search/Filter APIs
 
 #### `GET /api/dashboard/search/calls`
 Search calls by transcript, caller info, call summary, or call ID.
@@ -458,4 +492,3 @@ Common HTTP status codes:
 3. **Pagination**: All list endpoints support pagination with `limit` and `offset` parameters.
 4. **Date Filtering**: Date parameters accept ISO 8601 date strings.
 5. **Soft Delete**: Agent deletion sets status to INACTIVE rather than removing the record.
-

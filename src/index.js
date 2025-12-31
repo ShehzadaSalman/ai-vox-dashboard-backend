@@ -4,6 +4,7 @@ import helmet from "helmet";
 import rateLimit from "express-rate-limit";
 import dotenv from "dotenv";
 import { logger } from "./lib/logger.js";
+import { ensureSuperAdmin } from "./lib/superadmin.js";
 import { errorHandler } from "./middleware/errorHandler.js";
 import { authMiddleware } from "./middleware/auth.js";
 import authRoutes from "./routes/auth.js";
@@ -74,11 +75,19 @@ app.use("*", (req, res) => {
 // Error handling middleware (must be last)
 app.use(errorHandler);
 
-// Start server only if not in Cloudflare Workers environment
-if (typeof navigator === "undefined" && typeof EdgeRuntime === "undefined") {
+// Start server only when running under Node (not Cloudflare Workers/Edge)
+const isNodeRuntime =
+  typeof process !== "undefined" &&
+  process.release &&
+  process.release.name === "node";
+
+if (isNodeRuntime) {
   app.listen(PORT, () => {
     logger.info(`Server running on port ${PORT}`);
     logger.info(`Environment: ${process.env.NODE_ENV || "development"}`);
+    ensureSuperAdmin().catch((error) => {
+      logger.error("Failed to bootstrap superadmin", { error: error.message });
+    });
   });
 }
 
