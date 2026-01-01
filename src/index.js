@@ -79,7 +79,9 @@ app.use(errorHandler);
 const isNodeRuntime =
   typeof process !== "undefined" &&
   process.release &&
-  process.release.name === "node";
+  process.release.name === "node" &&
+  !process.env.VERCEL &&
+  !process.env.AWS_LAMBDA_FUNCTION_NAME;
 
 if (isNodeRuntime) {
   app.listen(PORT, () => {

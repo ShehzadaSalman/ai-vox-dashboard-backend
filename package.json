@@ -13,7 +13,8 @@
     "db:migrate": "prisma migrate dev",
     "db:studio": "prisma studio",
     "deploy": "wrangler deploy",
-    "deploy:pages": "wrangler pages deploy"
+    "deploy:pages": "wrangler pages deploy",
+    "postinstall": "prisma generate"
   },
   "keywords": [
     "ai",
