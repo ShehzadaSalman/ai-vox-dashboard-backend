@@ -44,7 +44,6 @@ const normalizeRetellAgents = (agents) => {
 
 // Validation schemas
 const syncCallsSchema = Joi.object({
-  days: Joi.number().integer().min(1).max(365).default(365),
   agentId: Joi.string().optional(),
 });
 
@@ -77,15 +76,11 @@ const callsListSchema = Joi.object({
   limit: Joi.number().integer().min(1).max(100).default(20),
   offset: Joi.number().integer().min(0).default(0),
   agentId: Joi.string().optional(),
-  startDate: Joi.date().optional(),
-  endDate: Joi.date().optional(),
   callStatus: Joi.string().optional(),
   sortBy: Joi.string().valid("date", "duration", "cost").default("date"),
 });
 
 const analyticsDateRangeSchema = Joi.object({
-  startDate: Joi.date().optional(),
-  endDate: Joi.date().optional(),
   agentId: Joi.string().optional(),
 });
 
@@ -134,17 +129,9 @@ router.post(
       throw new ValidationError(error.details[0].message);
     }
 
-    const { days = 30, agentId } = value;
-
-    // Calculate date range
-    const endDate = new Date();
-    const startDate = new Date();
-    startDate.setDate(startDate.getDate() - days);
+    const { agentId } = value;
 
     logger.info("Starting call sync", {
-      days,
-      startDate: startDate.toISOString(),
-      endDate: endDate.toISOString(),
       agentId,
     });
 
@@ -177,8 +164,18 @@ router.post(
         );
       }
 
-      // Fetch calls from Retell API
-      const calls = await retellAPI.getAllCallsInRange(startDate, endDate);
+      const lastCall = await prisma.call.findFirst({
+        orderBy: { start_timestamp: "desc" },
+        select: { start_timestamp: true },
+      });
+      const startTimestamp = lastCall
+        ? Number(lastCall.start_timestamp) + 1
+        : null;
+
+      // Fetch calls from Retell API (incremental when possible)
+      const calls = await retellAPI.getAllCalls(100, {
+        ...(startTimestamp && { startTimestamp }),
+      });
       logger.info(
         `Retell calls response:\n${JSON.stringify(calls, null, 2)}`
       );
@@ -186,12 +183,8 @@ router.post(
       if (!calls || calls.length === 0) {
         return res.json({
           success: true,
-          message: "No calls found in the specified date range",
+          message: "No calls found",
           callsSynced: 0,
-          dateRange: {
-            start: startDate.toISOString(),
-            end: endDate.toISOString(),
-          },
         });
       }
 
@@ -244,6 +237,7 @@ router.post(
         try {
           // Calculate duration in seconds
           const durationSeconds = Math.floor(call.duration_ms / 1000);
+          const costCents = Math.round(call.call_cost?.combined_cost || 0);
 
           // Prepare call data - mapping from Retell API response structure
           const callData = {
@@ -257,7 +251,7 @@ router.post(
             transcript: call.transcript || null,
             call_status: call.call_status,
             disconnection_reason: call.disconnection_reason || null,
-            cost: call.call_cost?.combined_cost || 0,
+            cost: costCents,
             call_summary: call.call_analysis?.call_summary || null,
             user_sentiment: call.call_analysis?.user_sentiment || null,
             call_successful: call.call_analysis?.call_successful || false,
@@ -298,15 +292,10 @@ router.post(
         callsSynced: syncedCount,
         callsUpdated: updatedCount,
         errors: errorCount,
-        dateRange: {
-          start: startDate.toISOString(),
-          end: endDate.toISOString(),
-        },
       });
     } catch (error) {
       logger.error("Call sync failed", {
         error: error.message,
-        days,
         agentId,
       });
       throw error;
@@ -770,8 +759,7 @@ router.get(
       throw new ValidationError(error.details[0].message);
     }
 
-    const { limit, offset, agentId, startDate, endDate, callStatus, sortBy } =
-      value;
+    const { limit, offset, agentId, callStatus, sortBy } = value;
     const isUserScoped = req.user?.role === "USER";
     let assignedAgentIds = null;
     if (isUserScoped) {
@@ -801,19 +789,6 @@ router.get(
     }
     if (callStatus) {
       where.call_status = callStatus;
-    }
-    if (startDate || endDate) {
-      where.start_timestamp = {};
-      if (startDate) {
-        where.start_timestamp.gte = BigInt(
-          Math.floor(new Date(startDate).getTime())
-        );
-      }
-      if (endDate) {
-        where.start_timestamp.lte = BigInt(
-          Math.floor(new Date(endDate).getTime())
-        );
-      }
     }
     if (assignedAgentIds && agentId && !assignedAgentIds.includes(agentId)) {
       throw new ForbiddenError("Access to agent not permitted");
@@ -1058,7 +1033,7 @@ router.get(
       throw new ValidationError(error.details[0].message);
     }
 
-    const { startDate, endDate, agentId } = value;
+    const { agentId } = value;
     const isUserScoped = req.user?.role === "USER";
     let assignedAgentIds = null;
     if (isUserScoped) {
@@ -1087,19 +1062,6 @@ router.get(
       where.agent_id = agentId;
     } else if (assignedAgentIds) {
       where.agent_id = { in: assignedAgentIds };
-    }
-    if (startDate || endDate) {
-      where.start_timestamp = {};
-      if (startDate) {
-        where.start_timestamp.gte = BigInt(
-          Math.floor(new Date(startDate).getTime())
-        );
-      }
-      if (endDate) {
-        where.start_timestamp.lte = BigInt(
-          Math.floor(new Date(endDate).getTime())
-        );
-      }
     }
     if (assignedAgentIds && agentId && !assignedAgentIds.includes(agentId)) {
       throw new ForbiddenError("Access to agent not permitted");
@@ -1179,23 +1141,7 @@ router.get(
       throw new ValidationError(error.details[0].message);
     }
 
-    const { startDate, endDate } = value;
-
-    // Build where clause for calls
     const callWhere = {};
-    if (startDate || endDate) {
-      callWhere.start_timestamp = {};
-      if (startDate) {
-        callWhere.start_timestamp.gte = BigInt(
-          Math.floor(new Date(startDate).getTime())
-        );
-      }
-      if (endDate) {
-        callWhere.start_timestamp.lte = BigInt(
-          Math.floor(new Date(endDate).getTime())
-        );
-      }
-    }
 
     // Get all active agents
     const agents = await prisma.agent.findMany({
@@ -1274,23 +1220,13 @@ router.get(
       throw new ValidationError(error.details[0].message);
     }
 
-    const { startDate, endDate, agentId } = value;
-
-    // Default to last 30 days if no date range provided
-    const end = endDate ? new Date(endDate) : new Date();
-    const start = startDate
-      ? new Date(startDate)
-      : new Date(end.getTime() - 30 * 24 * 60 * 60 * 1000);
+    const { agentId } = value;
 
     // Build where clause
     const where = {};
     if (agentId) {
       where.agent_id = agentId;
     }
-    where.start_timestamp = {
-      gte: BigInt(Math.floor(start.getTime())),
-      lte: BigInt(Math.floor(end.getTime())),
-    };
 
     // Get daily call statistics
     const calls = await prisma.call.findMany({
@@ -1345,17 +1281,14 @@ router.get(
     res.json({
       success: true,
       data: {
-        dateRange: {
-          start: start.toISOString(),
-          end: end.toISOString(),
-        },
         summary: {
           totalCalls,
           successfulCalls,
           successRate:
             totalCalls > 0 ? Math.round((successfulCalls / totalCalls) * 100) : 0,
           totalCost: Math.round(totalCost * 100) / 100,
-          avgCost: Math.round((totalCost / totalCalls) * 100) / 100,
+          avgCost:
+            totalCalls > 0 ? Math.round((totalCost / totalCalls) * 100) / 100 : 0,
           totalDurationSeconds: totalDuration,
           avgDurationSeconds:
             totalCalls > 0 ? Math.round(totalDuration / totalCalls) : 0,
@@ -1378,25 +1311,12 @@ router.get(
       throw new ValidationError(error.details[0].message);
     }
 
-    const { startDate, endDate, agentId } = value;
+    const { agentId } = value;
 
     // Build where clause
     const where = {};
     if (agentId) {
       where.agent_id = agentId;
-    }
-    if (startDate || endDate) {
-      where.start_timestamp = {};
-      if (startDate) {
-        where.start_timestamp.gte = BigInt(
-          Math.floor(new Date(startDate).getTime())
-        );
-      }
-      if (endDate) {
-        where.start_timestamp.lte = BigInt(
-          Math.floor(new Date(endDate).getTime())
-        );
-      }
     }
     where.user_sentiment = { not: null };
 

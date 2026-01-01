@@ -71,7 +71,6 @@ Syncs call data from Retell API to the database.
 
 ```json
 {
-  "days": 30, // Number of days to sync (1-90, default: 30)
   "agentId": "optional" // Optional agent ID filter
 }
 ```
@@ -84,11 +83,7 @@ Syncs call data from Retell API to the database.
   "message": "Call sync completed",
   "callsSynced": 15,
   "callsUpdated": 3,
-  "errors": 0,
-  "dateRange": {
-    "start": "2024-01-01T00:00:00.000Z",
-    "end": "2024-01-31T23:59:59.999Z"
-  }
+  "errors": 0
 }
 ```
 

@@ -117,8 +117,6 @@ List all calls with filters and pagination.
 - `limit` (optional): Number of calls per page (1-100, default: 20)
 - `offset` (optional): Number of calls to skip (default: 0)
 - `agentId` (optional): Filter by agent ID
-- `startDate` (optional): Filter by start date (ISO date string)
-- `endDate` (optional): Filter by end date (ISO date string)
 - `callStatus` (optional): Filter by call status
 - `sortBy` (optional): Sort by "date", "duration", or "cost" (default: "date")
 
@@ -176,8 +174,6 @@ Get call history across all agents (without agent filter).
 Get dashboard overview statistics.
 
 **Query Parameters:**
-- `startDate` (optional): Start date for filtering (ISO date string)
-- `endDate` (optional): End date for filtering (ISO date string)
 - `agentId` (optional): Filter by agent ID
 
 **Response:**
@@ -205,9 +201,6 @@ Get dashboard overview statistics.
 Get agent performance metrics.
 
 **Query Parameters:**
-- `startDate` (optional): Start date for filtering
-- `endDate` (optional): End date for filtering
-
 **Response:**
 ```json
 {
@@ -233,8 +226,6 @@ Get agent performance metrics.
 Get call analytics and trends with daily statistics.
 
 **Query Parameters:**
-- `startDate` (optional): Start date (defaults to 30 days ago)
-- `endDate` (optional): End date (defaults to now)
 - `agentId` (optional): Filter by agent ID
 
 **Response:**
@@ -242,10 +233,6 @@ Get call analytics and trends with daily statistics.
 {
   "success": true,
   "data": {
-    "dateRange": {
-      "start": "2024-01-01T00:00:00.000Z",
-      "end": "2024-01-31T23:59:59.999Z"
-    },
     "summary": {
       "totalCalls": 1000,
       "successfulCalls": 850,
@@ -273,8 +260,6 @@ Get call analytics and trends with daily statistics.
 Get sentiment analysis summary.
 
 **Query Parameters:**
-- `startDate` (optional): Start date for filtering
-- `endDate` (optional): End date for filtering
 - `agentId` (optional): Filter by agent ID
 
 **Response:**

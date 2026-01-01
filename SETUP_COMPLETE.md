@@ -95,7 +95,6 @@ aivox-dashboard-backend/
 
 - ✅ Fetches calls from Retell API with pagination
 - ✅ Handles large datasets efficiently
-- ✅ Configurable date range (1-90 days)
 - ✅ Agent filtering support
 - ✅ Upsert logic (update existing, create new)
 - ✅ Automatic agent creation

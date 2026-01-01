@@ -65,7 +65,8 @@ class RetellAPI {
    * @param {string} options.startAfter - Call ID to start after (for pagination)
    * @param {number} options.startTimestamp - Start timestamp filter (Unix timestamp in seconds)
    * @param {number} options.endTimestamp - End timestamp filter (Unix timestamp in seconds)
-   * @returns {Promise<Object>} - API response with calls array
+   * @param {Object} options.filterCriteria - Additional Retell filter_criteria options
+   * @returns {Promise<Array>} - Calls array
    */
   async getCalls(options = {}) {
     try {
@@ -81,13 +82,24 @@ class RetellAPI {
                 }),
               },
             }
-          : undefined;
+          : {};
 
-      return await this.sdk.call.list({
+      const mergedFilterCriteria = {
+        ...filterCriteria,
+        ...(options.filterCriteria || {}),
+      };
+
+      const response = await this.client.post("/list-calls", {
         limit: options.limit || 100,
         ...(options.startAfter && { pagination_key: options.startAfter }),
-        ...(filterCriteria && { filter_criteria: filterCriteria }),
+        ...(Object.keys(mergedFilterCriteria).length > 0 && {
+          filter_criteria: mergedFilterCriteria,
+        }),
       });
+      const data = response.data;
+      const calls = Array.isArray(data) ? data : data?.calls || [];
+      console.log("Retell call history response", calls);
+      return calls;
     } catch (error) {
       logger.error("Failed to fetch calls from Retell API", {
         error: error.message,
@@ -98,25 +110,19 @@ class RetellAPI {
   }
 
   /**
-   * Fetch all calls within a date range with pagination
-   * @param {Date} startDate - Start date
-   * @param {Date} endDate - End date
+   * Fetch all calls with pagination
    * @param {number} limit - Calls per page
+   * @param {Object} options - Query options
    * @returns {Promise<Array>} - Array of all calls
    */
-  async getAllCallsInRange(startDate, endDate, limit = 100) {
+  async getAllCalls(limit = 100, options = {}) {
     const allCalls = [];
     let startAfter = null;
     let hasMore = true;
 
-    const startTimestamp = Math.floor(startDate.getTime() / 1000);
-    const endTimestamp = Math.floor(endDate.getTime() / 1000);
-
     logger.info("Fetching calls from Retell API", {
-      startDate: startDate.toISOString(),
-      endDate: endDate.toISOString(),
-      startTimestamp,
-      endTimestamp,
+      limit,
+      startTimestamp: options.startTimestamp,
     });
 
     while (hasMore) {
@@ -124,8 +130,8 @@ class RetellAPI {
         const calls = await this.getCalls({
           limit,
           startAfter,
-          startTimestamp,
-          endTimestamp,
+          ...(options.startTimestamp && { startTimestamp: options.startTimestamp }),
+          ...(options.filterCriteria && { filterCriteria: options.filterCriteria }),
         });
         allCalls.push(...calls);
 
@@ -156,7 +162,6 @@ class RetellAPI {
 
     logger.info("Completed fetching all calls", {
       totalCalls: allCalls.length,
-      dateRange: `${startDate.toISOString()} to ${endDate.toISOString()}`,
     });
 
     return allCalls;
