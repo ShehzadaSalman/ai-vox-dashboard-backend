@@ -80,8 +80,7 @@ const isNodeRuntime =
   typeof process !== "undefined" &&
   process.release &&
   process.release.name === "node" &&
-  !process.env.VERCEL &&
-  !process.env.AWS_LAMBDA_FUNCTION_NAME;
+  !process.env.NETLIFY;
 
 if (isNodeRuntime) {
   app.listen(PORT, () => {

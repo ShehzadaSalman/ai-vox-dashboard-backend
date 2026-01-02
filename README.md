@@ -87,6 +87,30 @@ Syncs call data from Retell API to the database.
 }
 ```
 
+## Netlify Deployment
+
+This backend is deployed as a Netlify Function using `netlify.toml`.
+
+### Netlify UI settings (for GitHub deploy)
+
+If this backend lives inside a monorepo:
+
+- **Base directory**: `ai-vox-dashboard-backend`
+- **Build command**: `npm run db:generate`
+- **Publish directory**: (leave blank)
+- **Functions directory**: `netlify/functions`
+
+### Environment variables (Netlify → Site settings → Environment variables)
+
+Set these in Netlify (use your real values):
+
+- `DATABASE_URL`
+- `RETELL_API_KEY`
+- `API_AUTH_KEY`
+- `JWT_SECRET`
+- `NODE_ENV=production`
+- `ALLOWED_ORIGINS` (optional, comma-separated)
+
 #### `GET /api/dashboard/agent-info/:agentId`
 
 Returns basic agent information.
