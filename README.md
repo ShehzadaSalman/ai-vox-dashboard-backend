@@ -158,6 +158,64 @@ Returns paginated call history for an agent.
 }
 ```
 
+#### `POST /api/dashboard/leads`
+
+Create a lead captured by an agent. Requires `name`, `address`, `visitTime`, and `agentId`.
+`agentName` is optional and will be resolved from the agents table when `agentId` is valid.
+
+**Request Body:**
+
+```json
+{
+  "name": "Maria Santos",
+  "email": "maria.santos@example.com",
+  "phone": "+1-555-201-8899",
+  "company": "Bright Smiles Dental",
+  "address": "123 Market St, San Francisco, CA",
+  "visitTime": "2025-10-05T10:30:00.000Z",
+  "reason": "New patient cleaning",
+  "agentId": "agent_001",
+  "status": "new"
+}
+```
+
+**Response:**
+
+```json
+{
+  "success": true,
+  "data": {
+    "id": "lead_123",
+    "name": "Maria Santos",
+    "email": "maria.santos@example.com",
+    "phone": "+1-555-201-8899",
+    "company": "Bright Smiles Dental",
+    "address": "123 Market St, San Francisco, CA",
+    "agent_id": "agent_001",
+    "visit_time": "2025-10-05T10:30:00.000Z",
+    "reason": "New patient cleaning",
+    "agent_name": "Customer Support Agent",
+    "status": "NEW",
+    "created_at": "2025-10-02T15:10:12.000Z",
+    "updated_at": "2025-10-02T15:10:12.000Z"
+  }
+}
+```
+
+#### `GET /api/dashboard/leads`
+
+List leads with optional status filtering.
+
+**Query Parameters:**
+
+- `limit`: Number of leads per page (1-100, default: 50)
+- `offset`: Number of leads to skip (default: 0)
+- `status`: Filter by status (`new`, `contacted`, `qualified`)
+
+#### `DELETE /api/dashboard/leads/:leadId`
+
+Delete a lead by ID.
+
 ## Setup Instructions
 
 ### 1. Install Dependencies

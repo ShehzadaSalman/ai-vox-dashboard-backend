@@ -69,9 +69,33 @@ model UserAgent {
   @@map("user_agents")
 }
 
+model Lead {
+  id         String     @id @default(cuid())
+  name       String
+  email      String?
+  phone      String?
+  company    String?
+  address    String?
+  agent_id   String?
+  visit_time DateTime?
+  reason     String?
+  agent_name String?
+  status     LeadStatus @default(NEW)
+  created_at DateTime   @default(now())
+  updated_at DateTime   @updatedAt
+
+  @@map("leads")
+}
+
 enum AgentStatus {
   ACTIVE
   INACTIVE
+}
+
+enum LeadStatus {
+  NEW
+  CONTACTED
+  QUALIFIED
 }
 
 enum UserRole {

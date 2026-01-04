@@ -116,6 +116,39 @@ const searchAgentsSchema = Joi.object({
   offset: Joi.number().integer().min(0).default(0),
 });
 
+const createLeadSchema = Joi.object({
+  name: Joi.string().max(200).required(),
+  email: Joi.string().email().max(320).optional().allow(null, ""),
+  phone: Joi.string().max(50).optional().allow(null, ""),
+  company: Joi.string().max(200).optional().allow(null, ""),
+  address: Joi.string().max(500).required(),
+  agentId: Joi.string().max(200).required(),
+  visitTime: Joi.date().iso().required(),
+  reason: Joi.string().max(500).optional().allow(null, ""),
+  agentName: Joi.string().max(200).optional().allow(null, ""),
+  status: Joi.string().valid("new", "contacted", "qualified").default("new"),
+  createdAt: Joi.date().iso().optional(),
+});
+
+const leadListSchema = Joi.object({
+  limit: Joi.number().integer().min(1).max(100).default(50),
+  offset: Joi.number().integer().min(0).default(0),
+  status: Joi.string().valid("new", "contacted", "qualified").optional(),
+});
+
+const normalizeOptionalValue = (value) => {
+  if (value === "" || value === undefined) {
+    return null;
+  }
+  return value;
+};
+
+const leadStatusMap = {
+  new: "NEW",
+  contacted: "CONTACTED",
+  qualified: "QUALIFIED",
+};
+
 /**
  * POST /api/dashboard/sync-calls
  * Syncs call data from Retell API to database
@@ -740,6 +773,165 @@ router.post(
       });
       throw error;
     }
+  })
+);
+
+// ============================================
+// LEADS APIs
+// ============================================
+
+/**
+ * POST /api/dashboard/leads
+ * Store a lead captured by an agent
+ */
+router.post(
+  "/leads",
+  asyncHandler(async (req, res) => {
+    const { error, value } = createLeadSchema.validate(req.body);
+    if (error) {
+      throw new ValidationError(error.details[0].message);
+    }
+
+    const agentRecord = await prisma.agent.findUnique({
+      where: { agent_id: value.agentId },
+      select: { agent_name: true },
+    });
+    if (!agentRecord) {
+      throw new ValidationError("Agent ID not found");
+    }
+    const resolvedAgentName = agentRecord.agent_name;
+
+    const lead = await prisma.lead.create({
+      data: {
+        name: value.name,
+        email: normalizeOptionalValue(value.email),
+        phone: normalizeOptionalValue(value.phone),
+        company: normalizeOptionalValue(value.company),
+        address: normalizeOptionalValue(value.address),
+        agent_id: normalizeOptionalValue(value.agentId),
+        reason: normalizeOptionalValue(value.reason),
+        agent_name:
+          normalizeOptionalValue(resolvedAgentName) ||
+          normalizeOptionalValue(value.agentName),
+        status: leadStatusMap[value.status] || "NEW",
+        ...(value.visitTime ? { visit_time: new Date(value.visitTime) } : {}),
+        ...(value.createdAt ? { created_at: new Date(value.createdAt) } : {}),
+      },
+      select: {
+        id: true,
+        name: true,
+        email: true,
+        phone: true,
+        company: true,
+        address: true,
+        agent_id: true,
+        visit_time: true,
+        reason: true,
+        agent_name: true,
+        status: true,
+        created_at: true,
+        updated_at: true,
+      },
+    });
+
+    res.status(201).json({
+      success: true,
+      data: lead,
+    });
+  })
+);
+
+/**
+ * GET /api/dashboard/leads
+ * List leads with optional status filtering
+ */
+router.get(
+  "/leads",
+  asyncHandler(async (req, res) => {
+    const { error, value } = leadListSchema.validate(req.query);
+    if (error) {
+      throw new ValidationError(error.details[0].message);
+    }
+
+    const { limit, offset, status } = value;
+    const where = {};
+    if (status) {
+      where.status = leadStatusMap[status] || "NEW";
+    }
+
+    const [leads, totalCount] = await Promise.all([
+      prisma.lead.findMany({
+        where,
+        orderBy: { created_at: "desc" },
+        skip: offset,
+        take: limit,
+        select: {
+          id: true,
+          name: true,
+          email: true,
+          phone: true,
+          company: true,
+          address: true,
+          agent_id: true,
+          visit_time: true,
+          reason: true,
+          agent_name: true,
+          status: true,
+          created_at: true,
+          updated_at: true,
+        },
+      }),
+      prisma.lead.count({ where }),
+    ]);
+
+    const formattedLeads = leads.map((lead) => ({
+      ...lead,
+      status: lead.status ? lead.status.toLowerCase() : null,
+    }));
+
+    res.json({
+      success: true,
+      data: {
+        leads: formattedLeads,
+        pagination: {
+          total: totalCount,
+          limit,
+          offset,
+          hasMore: offset + limit < totalCount,
+        },
+      },
+    });
+  })
+);
+
+/**
+ * DELETE /api/dashboard/leads/:leadId
+ * Delete a lead by id
+ */
+router.delete(
+  "/leads/:leadId",
+  asyncHandler(async (req, res) => {
+    const { leadId } = req.params;
+
+    if (!leadId) {
+      throw new ValidationError("Lead ID is required");
+    }
+
+    const existing = await prisma.lead.findUnique({
+      where: { id: leadId },
+      select: { id: true },
+    });
+
+    if (!existing) {
+      throw new NotFoundError(`Lead with ID ${leadId} not found`);
+    }
+
+    await prisma.lead.delete({ where: { id: leadId } });
+
+    res.json({
+      success: true,
+      message: "Lead deleted successfully",
+    });
   })
 );
 

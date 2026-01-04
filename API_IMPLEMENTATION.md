@@ -108,7 +108,46 @@ Sync agents from Retell API to database.
 
 ---
 
-### 2. Call Management APIs
+### 2. Lead Management APIs
+
+#### `POST /api/dashboard/leads`
+Create a new lead captured by an agent.
+
+**Required Fields:** `name`, `address`, `visitTime`, `agentId`
+
+**Request Body:**
+```json
+{
+  "name": "Maria Santos",
+  "email": "maria.santos@example.com",
+  "phone": "+1-555-201-8899",
+  "company": "Bright Smiles Dental",
+  "address": "123 Market St, San Francisco, CA",
+  "visitTime": "2025-10-05T10:30:00.000Z",
+  "reason": "New patient cleaning",
+  "agentId": "agent_001",
+  "status": "new"
+}
+```
+
+**Notes:**
+- `agentName` is optional and will be resolved from the agents table when `agentId` is valid.
+- Invalid or missing required fields return `400`.
+
+#### `GET /api/dashboard/leads`
+List leads with optional status filtering.
+
+**Query Parameters:**
+- `limit` (optional): Number of leads per page (1-100, default: 50)
+- `offset` (optional): Number of leads to skip (default: 0)
+- `status` (optional): Filter by status ("new", "contacted", "qualified")
+
+#### `DELETE /api/dashboard/leads/:leadId`
+Delete a lead by ID.
+
+---
+
+### 3. Call Management APIs
 
 #### `GET /api/dashboard/calls`
 List all calls with filters and pagination.
@@ -168,7 +207,7 @@ Get call history across all agents (without agent filter).
 
 ---
 
-### 3. Analytics/Reporting APIs
+### 4. Analytics/Reporting APIs
 
 #### `GET /api/dashboard/analytics/overview`
 Get dashboard overview statistics.
@@ -288,7 +327,7 @@ Get sentiment analysis summary.
 
 ---
 
-### 4. User Management APIs (Admin Only)
+### 5. User Management APIs (Admin Only)
 
 All user management APIs require admin authentication.
 
@@ -324,7 +363,7 @@ Delete user (admin only).
 
 ---
 
-### 5. Agent Assignment APIs (Admin Only)
+### 6. Agent Assignment APIs (Admin Only)
 
 Assign and manage agent ownership for users.
 
@@ -358,7 +397,7 @@ List users assigned to an agent.
 
 ---
 
-### 6. Utility/Status APIs
+### 7. Utility/Status APIs
 
 #### `GET /api/dashboard/stats`
 Get quick statistics.
@@ -403,7 +442,7 @@ Get sync status information.
 
 ---
 
-### 7. Search/Filter APIs
+### 8. Search/Filter APIs
 
 #### `GET /api/dashboard/search/calls`
 Search calls by transcript, caller info, call summary, or call ID.
