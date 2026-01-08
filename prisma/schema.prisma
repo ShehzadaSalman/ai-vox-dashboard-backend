@@ -77,7 +77,7 @@ model Lead {
   company    String?
   address    String?
   agent_id   String?
-  visit_time DateTime?
+  visit_time String?
   reason     String?
   agent_name String?
   status     LeadStatus @default(NEW)

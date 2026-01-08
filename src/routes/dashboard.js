@@ -123,7 +123,7 @@ const createLeadSchema = Joi.object({
   company: Joi.string().max(200).optional().allow(null, ""),
   address: Joi.string().max(500).required(),
   agentId: Joi.string().max(200).required(),
-  visitTime: Joi.date().iso().required(),
+  visitTime: Joi.string().max(200).optional().allow(null, ""),
   reason: Joi.string().max(500).optional().allow(null, ""),
   agentName: Joi.string().max(200).optional().allow(null, ""),
   status: Joi.string().valid("new", "contacted", "qualified").default("new"),
@@ -814,7 +814,9 @@ router.post(
           normalizeOptionalValue(resolvedAgentName) ||
           normalizeOptionalValue(value.agentName),
         status: leadStatusMap[value.status] || "NEW",
-        ...(value.visitTime ? { visit_time: new Date(value.visitTime) } : {}),
+        ...(value.visitTime
+          ? { visit_time: normalizeOptionalValue(value.visitTime) }
+          : {}),
         ...(value.createdAt ? { created_at: new Date(value.createdAt) } : {}),
       },
       select: {

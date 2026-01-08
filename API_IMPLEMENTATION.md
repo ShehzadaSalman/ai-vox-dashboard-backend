@@ -113,7 +113,7 @@ Sync agents from Retell API to database.
 #### `POST /api/dashboard/leads`
 Create a new lead captured by an agent.
 
-**Required Fields:** `name`, `address`, `visitTime`, `agentId`
+**Required Fields:** `name`, `address`, `agentId`
 
 **Request Body:**
 ```json
@@ -123,7 +123,7 @@ Create a new lead captured by an agent.
   "phone": "+1-555-201-8899",
   "company": "Bright Smiles Dental",
   "address": "123 Market St, San Francisco, CA",
-  "visitTime": "2025-10-05T10:30:00.000Z",
+  "visitTime": "Today, between 4:00 and 6:00 PM",
   "reason": "New patient cleaning",
   "agentId": "agent_001",
   "status": "new"
