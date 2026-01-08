@@ -47,10 +47,14 @@ export const errorHandler = (err, req, res, next) => {
     message = "Internal Server Error";
   }
 
+  const includePayload =
+    err.name === "ValidationError" && process.env.NODE_ENV !== "production";
+
   // Send error response
   res.status(statusCode).json({
     error: true,
     message,
+    ...(includePayload && { payload: req.body }),
     ...(process.env.NODE_ENV === "development" && { stack: err.stack }),
   });
 };
