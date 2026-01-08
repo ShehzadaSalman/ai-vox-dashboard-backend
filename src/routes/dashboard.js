@@ -1259,61 +1259,54 @@ router.get(
       throw new ForbiddenError("Access to agent not permitted");
     }
 
-    const [
-      totalCalls,
-      totalCost,
-      successfulCalls,
-      totalAgents,
-      totalDuration,
-      callsByStatus,
-    ] = await Promise.all([
-      prisma.call.count({ where }),
-      prisma.call.aggregate({
-        where,
-        _sum: { cost: true },
-      }),
-      prisma.call.count({
-        where: { ...where, call_successful: true },
-      }),
-      agentId
-        ? Promise.resolve(1)
-        : assignedAgentIds
-          ? prisma.agent.count({
-              where: { status: "ACTIVE", agent_id: { in: assignedAgentIds } },
-            })
-          : prisma.agent.count({ where: { status: "ACTIVE" } }),
-      prisma.call.aggregate({
-        where,
-        _sum: { duration_seconds: true },
-      }),
-      prisma.call.groupBy({
-        by: ["call_status"],
-        where,
-        _count: true,
-      }),
-    ]);
+    const callAggregate = await prisma.call.aggregate({
+      where,
+      _count: { _all: true },
+      _sum: { cost: true, duration_seconds: true },
+    });
+    const successCounts = await prisma.call.groupBy({
+      by: ["call_successful"],
+      where,
+      _count: { _all: true },
+    });
+    const callsByStatus = await prisma.call.groupBy({
+      by: ["call_status"],
+      where,
+      _count: { _all: true },
+    });
+    const totalAgents = agentId
+      ? 1
+      : assignedAgentIds
+        ? await prisma.agent.count({
+            where: { status: "ACTIVE", agent_id: { in: assignedAgentIds } },
+          })
+        : await prisma.agent.count({ where: { status: "ACTIVE" } });
+
+    const totalCalls = callAggregate._count._all || 0;
+    const totalCost = callAggregate._sum.cost || 0;
+    const totalDuration = callAggregate._sum.duration_seconds || 0;
+    const successfulCalls =
+      successCounts.find((row) => row.call_successful)?._count._all || 0;
 
     const avgDuration =
-      totalCalls > 0
-        ? Math.round((totalDuration._sum.duration_seconds || 0) / totalCalls)
-        : 0;
+      totalCalls > 0 ? Math.round(totalDuration / totalCalls) : 0;
     const successRate =
       totalCalls > 0 ? (successfulCalls / totalCalls) * 100 : 0;
-    const avgCost = totalCalls > 0 ? (totalCost._sum.cost || 0) / totalCalls : 0;
+    const avgCost = totalCalls > 0 ? totalCost / totalCalls : 0;
 
     res.json({
       success: true,
       data: {
         totalCalls,
-        totalCost: totalCost._sum.cost || 0,
+        totalCost,
         avgCost: Math.round(avgCost * 100) / 100,
         successfulCalls,
         successRate: Math.round(successRate * 100) / 100,
         totalAgents,
-        totalDurationSeconds: totalDuration._sum.duration_seconds || 0,
+        totalDurationSeconds: totalDuration,
         avgDurationSeconds: avgDuration,
         callsByStatus: callsByStatus.reduce((acc, item) => {
-          acc[item.call_status] = item._count;
+          acc[item.call_status] = item._count._all;
           return acc;
         }, {}),
       },
@@ -2041,31 +2034,25 @@ router.get(
       }
     }
 
-    const [totalAgents, activeAgents, totalCalls, totalCost] = await Promise.all(
-      [
-        assignedAgentIds
-          ? prisma.agent.count({
-              where: { agent_id: { in: assignedAgentIds } },
-            })
-          : prisma.agent.count(),
-        assignedAgentIds
-          ? prisma.agent.count({
-              where: { status: "ACTIVE", agent_id: { in: assignedAgentIds } },
-            })
-          : prisma.agent.count({ where: { status: "ACTIVE" } }),
-        assignedAgentIds
-          ? prisma.call.count({ where: { agent_id: { in: assignedAgentIds } } })
-          : prisma.call.count(),
-        assignedAgentIds
-          ? prisma.call.aggregate({
-              where: { agent_id: { in: assignedAgentIds } },
-              _sum: { cost: true },
-            })
-          : prisma.call.aggregate({
-              _sum: { cost: true },
-            }),
-      ]
+    const agentCounts = await prisma.agent.groupBy({
+      by: ["status"],
+      where: assignedAgentIds ? { agent_id: { in: assignedAgentIds } } : {},
+      _count: { _all: true },
+    });
+    const callAggregate = await prisma.call.aggregate({
+      where: assignedAgentIds ? { agent_id: { in: assignedAgentIds } } : {},
+      _count: { _all: true },
+      _sum: { cost: true },
+    });
+
+    const totalAgents = agentCounts.reduce(
+      (sum, row) => sum + (row._count._all || 0),
+      0
     );
+    const activeAgents =
+      agentCounts.find((row) => row.status === "ACTIVE")?._count._all || 0;
+    const totalCalls = callAggregate._count._all || 0;
+    const totalCost = callAggregate._sum.cost || 0;
 
     res.json({
       success: true,
@@ -2079,7 +2066,7 @@ router.get(
           total: totalCalls,
         },
         cost: {
-          total: totalCost._sum.cost || 0,
+          total: totalCost,
         },
       },
     });
