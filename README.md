@@ -96,7 +96,7 @@ This backend is deployed as a Netlify Function using `netlify.toml`.
 If this backend lives inside a monorepo:
 
 - **Base directory**: `ai-vox-dashboard-backend`
-- **Build command**: `npm run db:generate`
+- **Build command**: `npm run db:migrate:deploy && npm run db:generate`
 - **Publish directory**: (leave blank)
 - **Functions directory**: `netlify/functions`
 

@@ -1,5 +1,5 @@
 [build]
-  command = "npm run db:generate"
+  command = "npm run db:migrate:deploy && npm run db:generate"
   functions = "netlify/functions"
 
 [functions]
