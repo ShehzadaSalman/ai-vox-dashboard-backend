@@ -3,6 +3,7 @@ import Joi from "joi";
 import { prisma } from "../lib/database.js";
 import { retellAPI } from "../lib/retell.js";
 import { logger } from "../lib/logger.js";
+import { sendNewLeadSms } from "../services/smsService.js";
 import {
   asyncHandler,
   ValidationError,
@@ -833,6 +834,23 @@ router.post(
         updated_at: true,
       },
     });
+
+    try {
+      await sendNewLeadSms({
+        name: value.name,
+        email: value.email,
+        phone: value.phone,
+        company: value.company,
+        address: value.address,
+        agentId: value.agentId,
+        visitTime: value.visitTime,
+        reason: value.reason,
+        agentName: resolvedAgentName || value.agentName,
+        status: value.status,
+      });
+    } catch (error) {
+      logger.error("Failed to send lead SMS", { error: error.message });
+    }
 
     res.status(201).json({
       success: true,

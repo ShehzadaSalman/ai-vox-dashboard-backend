@@ -110,6 +110,9 @@ Set these in Netlify (use your real values):
 - `JWT_SECRET`
 - `NODE_ENV=production`
 - `ALLOWED_ORIGINS` (optional, comma-separated)
+- `TWILIO_ACCOUNT_SID` (required for lead SMS)
+- `TWILIO_AUTH_TOKEN` (required for lead SMS)
+- `TWILIO_FROM_NUMBER` (required for lead SMS)
 
 #### `GET /api/dashboard/agent-info/:agentId`
 
@@ -130,6 +133,14 @@ Returns basic agent information.
   }
 }
 ```
+
+#### `POST /webhooks/retell`
+
+Receives Retell webhook events (`call_started`, `call_ended`, `call_analyzed`) and stores call history.
+
+**Notes:**
+- `call_started` is acknowledged but not persisted.
+- `call_ended` and `call_analyzed` are upserted into the `calls` table.
 
 #### `GET /api/dashboard/call-history/:agentId`
 

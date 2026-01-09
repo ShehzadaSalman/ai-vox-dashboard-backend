@@ -22,6 +22,17 @@ All dashboard APIs require authentication (JWT token or API key).
 
 ---
 
+## Webhooks
+
+### `POST /webhooks/retell`
+Receives Retell webhook events (`call_started`, `call_ended`, `call_analyzed`) and stores call history.
+
+**Notes:**
+- `call_started` is acknowledged but not persisted.
+- `call_ended` and `call_analyzed` are upserted into the `calls` table.
+
+---
+
 ## Newly Implemented APIs
 
 ### 1. Agent Management APIs

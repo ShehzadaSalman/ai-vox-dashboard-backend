@@ -9,6 +9,7 @@ import { errorHandler } from "./middleware/errorHandler.js";
 import { authMiddleware } from "./middleware/auth.js";
 import authRoutes from "./routes/auth.js";
 import dashboardRoutes from "./routes/dashboard.js";
+import webhookRoutes from "./routes/webhooks.js";
 
 // Load environment variables
 dotenv.config();
@@ -61,6 +62,8 @@ app.get("/health", (req, res) => {
 
 // Public auth routes
 app.use("/api/auth", authRoutes);
+// Public webhook routes
+app.use("/webhooks", webhookRoutes);
 
 // API routes with authentication
 app.use("/api/dashboard", authMiddleware, dashboardRoutes);
