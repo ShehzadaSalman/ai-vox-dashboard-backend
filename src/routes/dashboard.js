@@ -126,7 +126,7 @@ const createLeadSchema = Joi.object({
   visitTime: Joi.string().max(200).optional().allow(null, ""),
   reason: Joi.string().max(500).optional().allow(null, ""),
   agentName: Joi.string().max(200).optional().allow(null, ""),
-  status: Joi.string().valid("new", "contacted", "qualified").default("new"),
+  status: Joi.string().max(100).optional().allow(null, ""),
   createdAt: Joi.date().iso().optional(),
 });
 
