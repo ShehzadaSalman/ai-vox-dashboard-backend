@@ -160,7 +160,7 @@ Returns paginated call history for an agent.
 
 #### `POST /api/dashboard/leads`
 
-Create a lead captured by an agent. Requires `name`, `address`, and `agentId`.
+Create a lead captured by an agent. Requires `name`, `address`, and `agentId`. If provided, `visitTime` must be an ISO 8601 string.
 `agentName` is optional and will be resolved from the agents table when `agentId` is valid.
 
 **Request Body:**
@@ -172,7 +172,7 @@ Create a lead captured by an agent. Requires `name`, `address`, and `agentId`.
   "phone": "+1-555-201-8899",
   "company": "Bright Smiles Dental",
   "address": "123 Market St, San Francisco, CA",
-  "visitTime": "Today, between 4:00 and 6:00 PM",
+  "visitTime": "2026-01-08T16:00:00.000Z",
   "reason": "New patient cleaning",
   "agentId": "agent_001",
   "status": "new"

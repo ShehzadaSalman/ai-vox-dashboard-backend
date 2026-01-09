@@ -123,7 +123,7 @@ Create a new lead captured by an agent.
   "phone": "+1-555-201-8899",
   "company": "Bright Smiles Dental",
   "address": "123 Market St, San Francisco, CA",
-  "visitTime": "Today, between 4:00 and 6:00 PM",
+  "visitTime": "2026-01-08T16:00:00.000Z",
   "reason": "New patient cleaning",
   "agentId": "agent_001",
   "status": "new"
@@ -132,6 +132,7 @@ Create a new lead captured by an agent.
 
 **Notes:**
 - `agentName` is optional and will be resolved from the agents table when `agentId` is valid.
+- If provided, `visitTime` must be an ISO 8601 string.
 - Invalid or missing required fields return `400`.
 
 #### `GET /api/dashboard/leads`
