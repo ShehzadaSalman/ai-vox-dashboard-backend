@@ -3,7 +3,11 @@
 /**
  * Simple test script to verify the backend setup
  * Run with: node test-setup.js
- */
+DSCSDCSCSCSC 
+*/
+
+
+ 
 
 import dotenv from "dotenv";
 import { prisma } from "./src/lib/database.js";
