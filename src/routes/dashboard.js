@@ -14,6 +14,25 @@ import { adminMiddleware, superAdminMiddleware } from "../middleware/auth.js";
 
 const router = express.Router();
 
+const CACHE_TTL_MS = 30 * 1000;
+const responseCache = new Map();
+
+const getCachedResponse = (key) => {
+  const cached = responseCache.get(key);
+  if (!cached) {
+    return null;
+  }
+  if (cached.expiresAt < Date.now()) {
+    responseCache.delete(key);
+    return null;
+  }
+  return cached.value;
+};
+
+const setCachedResponse = (key, value) => {
+  responseCache.set(key, { value, expiresAt: Date.now() + CACHE_TTL_MS });
+};
+
 const getAssignedAgentIds = async (userId) => {
   const assignments = await prisma.userAgent.findMany({
     where: { user_id: userId },
@@ -52,6 +71,7 @@ const callHistorySchema = Joi.object({
   limit: Joi.number().integer().min(1).max(100).default(20),
   offset: Joi.number().integer().min(0).default(0),
   sortBy: Joi.string().valid("date", "duration", "cost").default("date"),
+  includeCount: Joi.boolean().truthy("true").falsy("false").default(true),
 });
 
 // Additional validation schemas
@@ -60,6 +80,7 @@ const agentListSchema = Joi.object({
   offset: Joi.number().integer().min(0).default(0),
   status: Joi.string().valid("ACTIVE", "INACTIVE").optional(),
   search: Joi.string().max(200).optional(),
+  includeCount: Joi.boolean().truthy("true").falsy("false").default(true),
 });
 
 const createAgentSchema = Joi.object({
@@ -79,6 +100,7 @@ const callsListSchema = Joi.object({
   agentId: Joi.string().optional(),
   callStatus: Joi.string().optional(),
   sortBy: Joi.string().valid("date", "duration", "cost").default("date"),
+  includeCount: Joi.boolean().truthy("true").falsy("false").default(true),
 });
 
 const analyticsDateRangeSchema = Joi.object({
@@ -135,6 +157,7 @@ const leadListSchema = Joi.object({
   limit: Joi.number().integer().min(1).max(100).default(50),
   offset: Joi.number().integer().min(0).default(0),
   status: Joi.string().valid("new", "contacted", "qualified").optional(),
+  includeCount: Joi.boolean().truthy("true").falsy("false").default(true),
 });
 
 const normalizeOptionalValue = (value) => {
@@ -391,7 +414,7 @@ router.get(
       throw new ValidationError("Agent ID is required");
     }
 
-    const { limit, offset, sortBy } = value;
+    const { limit, offset, sortBy, includeCount } = value;
 
     // Verify agent exists
     const agent = await prisma.agent.findUnique({
@@ -488,7 +511,7 @@ router.get(
       throw new ValidationError(error.details[0].message);
     }
 
-    const { limit, offset, status, search } = value;
+    const { limit, offset, status, search, includeCount } = value;
     const isUserScoped = req.user?.role === "USER";
     let assignedAgentIds = null;
     if (isUserScoped) {
@@ -524,12 +547,13 @@ router.get(
       ];
     }
 
+    const take = includeCount ? limit : limit + 1;
     const [agents, totalCount] = await Promise.all([
       prisma.agent.findMany({
         where,
         orderBy: { created_at: "desc" },
         skip: offset,
-        take: limit,
+        take,
         select: {
           id: true,
           agent_id: true,
@@ -542,18 +566,23 @@ router.get(
           },
         },
       }),
-      prisma.agent.count({ where }),
+      includeCount ? prisma.agent.count({ where }) : Promise.resolve(null),
     ]);
+
+    const slicedAgents = includeCount ? agents : agents.slice(0, limit);
+    const hasMore = includeCount
+      ? offset + limit < totalCount
+      : agents.length > limit;
 
     res.json({
       success: true,
       data: {
-        agents,
+        agents: slicedAgents,
         pagination: {
           total: totalCount,
           limit,
           offset,
-          hasMore: offset + limit < totalCount,
+          hasMore,
         },
       },
     });
@@ -891,7 +920,7 @@ router.get(
       throw new ValidationError(error.details[0].message);
     }
 
-    const { limit, offset, status } = value;
+    const { limit, offset, status, includeCount } = value;
     const isUserScoped = req.user?.role === "USER";
     let assignedAgentIds = null;
     if (isUserScoped) {
@@ -920,12 +949,13 @@ router.get(
       where.status = leadStatusMap[status] || "NEW";
     }
 
+    const take = includeCount ? limit : limit + 1;
     const [leads, totalCount] = await Promise.all([
       prisma.lead.findMany({
         where,
         orderBy: { created_at: "desc" },
         skip: offset,
-        take: limit,
+        take,
         select: {
           id: true,
           name: true,
@@ -942,10 +972,15 @@ router.get(
           updated_at: true,
         },
       }),
-      prisma.lead.count({ where }),
+      includeCount ? prisma.lead.count({ where }) : Promise.resolve(null),
     ]);
 
-    const formattedLeads = leads.map((lead) => ({
+    const slicedLeads = includeCount ? leads : leads.slice(0, limit);
+    const hasMore = includeCount
+      ? offset + limit < totalCount
+      : leads.length > limit;
+
+    const formattedLeads = slicedLeads.map((lead) => ({
       ...lead,
       status: lead.status ? lead.status.toLowerCase() : null,
     }));
@@ -958,7 +993,7 @@ router.get(
           total: totalCount,
           limit,
           offset,
-          hasMore: offset + limit < totalCount,
+          hasMore,
         },
       },
     });
@@ -1012,7 +1047,7 @@ router.get(
       throw new ValidationError(error.details[0].message);
     }
 
-    const { limit, offset, agentId, callStatus, sortBy } = value;
+    const { limit, offset, agentId, callStatus, sortBy, includeCount } = value;
     const isUserScoped = req.user?.role === "USER";
     let assignedAgentIds = null;
     if (isUserScoped) {
@@ -1062,12 +1097,13 @@ router.get(
         break;
     }
 
+    const take = includeCount ? limit : limit + 1;
     const [calls, totalCount] = await Promise.all([
       prisma.call.findMany({
         where,
         orderBy,
         skip: offset,
-        take: limit,
+        take,
         select: {
           id: true,
           call_id: true,
@@ -1095,11 +1131,16 @@ router.get(
           },
         },
       }),
-      prisma.call.count({ where }),
+      includeCount ? prisma.call.count({ where }) : Promise.resolve(null),
     ]);
 
+    const slicedCalls = includeCount ? calls : calls.slice(0, limit);
+    const hasMore = includeCount
+      ? offset + limit < totalCount
+      : calls.length > limit;
+
     // Convert BigInt timestamps to numbers
-    const formattedCalls = calls.map((call) => ({
+    const formattedCalls = slicedCalls.map((call) => ({
       ...call,
       start_timestamp: Number(call.start_timestamp),
       end_timestamp: Number(call.end_timestamp),
@@ -1113,7 +1154,7 @@ router.get(
           total: totalCount,
           limit,
           offset,
-          hasMore: offset + limit < totalCount,
+          hasMore,
         },
       },
     });
@@ -1213,11 +1254,12 @@ router.get(
     }
 
     // Get calls with pagination
+    const take = includeCount ? limit : limit + 1;
     const [calls, totalCount] = await Promise.all([
       prisma.call.findMany({
         orderBy,
         skip: offset,
-        take: limit,
+        take,
         select: {
           id: true,
           call_id: true,
@@ -1245,11 +1287,16 @@ router.get(
           },
         },
       }),
-      prisma.call.count(),
+      includeCount ? prisma.call.count() : Promise.resolve(null),
     ]);
 
+    const slicedCalls = includeCount ? calls : calls.slice(0, limit);
+    const hasMore = includeCount
+      ? offset + limit < totalCount
+      : calls.length > limit;
+
     // Convert BigInt timestamps to numbers for JSON serialization
-    const formattedCalls = calls.map((call) => ({
+    const formattedCalls = slicedCalls.map((call) => ({
       ...call,
       start_timestamp: Number(call.start_timestamp),
       end_timestamp: Number(call.end_timestamp),
@@ -1263,7 +1310,7 @@ router.get(
           total: totalCount,
           limit,
           offset,
-          hasMore: offset + limit < totalCount,
+          hasMore,
         },
       },
     });
@@ -1320,6 +1367,14 @@ router.get(
       throw new ForbiddenError("Access to agent not permitted");
     }
 
+    const cacheKey = `analytics-overview:${req.user?.id || "anon"}:${
+      agentId || "all"
+    }:${assignedAgentIds ? assignedAgentIds.join(",") : "all"}`;
+    const cached = getCachedResponse(cacheKey);
+    if (cached) {
+      return res.json({ success: true, data: cached });
+    }
+
     const callAggregate = await prisma.call.aggregate({
       where,
       _count: { _all: true },
@@ -1355,22 +1410,26 @@ router.get(
       totalCalls > 0 ? (successfulCalls / totalCalls) * 100 : 0;
     const avgCost = totalCalls > 0 ? totalCost / totalCalls : 0;
 
+    const payload = {
+      totalCalls,
+      totalCost,
+      avgCost: Math.round(avgCost * 100) / 100,
+      successfulCalls,
+      successRate: Math.round(successRate * 100) / 100,
+      totalAgents,
+      totalDurationSeconds: totalDuration,
+      avgDurationSeconds: avgDuration,
+      callsByStatus: callsByStatus.reduce((acc, item) => {
+        acc[item.call_status] = item._count._all;
+        return acc;
+      }, {}),
+    };
+
+    setCachedResponse(cacheKey, payload);
+
     res.json({
       success: true,
-      data: {
-        totalCalls,
-        totalCost,
-        avgCost: Math.round(avgCost * 100) / 100,
-        successfulCalls,
-        successRate: Math.round(successRate * 100) / 100,
-        totalAgents,
-        totalDurationSeconds: totalDuration,
-        avgDurationSeconds: avgDuration,
-        callsByStatus: callsByStatus.reduce((acc, item) => {
-          acc[item.call_status] = item._count._all;
-          return acc;
-        }, {}),
-      },
+      data: payload,
     });
   })
 );
@@ -1385,6 +1444,12 @@ router.get(
     const { error, value } = analyticsDateRangeSchema.validate(req.query);
     if (error) {
       throw new ValidationError(error.details[0].message);
+    }
+
+    const cacheKey = "analytics-agents";
+    const cached = getCachedResponse(cacheKey);
+    if (cached) {
+      return res.json({ success: true, data: cached });
     }
 
     const callWhere = {};
@@ -1447,6 +1512,8 @@ router.get(
       })
     );
 
+    setCachedResponse(cacheKey, agentMetrics);
+
     res.json({
       success: true,
       data: agentMetrics,
@@ -1472,6 +1539,12 @@ router.get(
     const where = {};
     if (agentId) {
       where.agent_id = agentId;
+    }
+
+    const cacheKey = `analytics-calls:${agentId || "all"}`;
+    const cached = getCachedResponse(cacheKey);
+    if (cached) {
+      return res.json({ success: true, data: cached });
     }
 
     // Get daily call statistics
@@ -1524,23 +1597,31 @@ router.get(
     );
     const successfulCalls = calls.filter((call) => call.call_successful).length;
 
+    const payload = {
+      summary: {
+        totalCalls,
+        successfulCalls,
+        successRate:
+          totalCalls > 0
+            ? Math.round((successfulCalls / totalCalls) * 100)
+            : 0,
+        totalCost: Math.round(totalCost * 100) / 100,
+        avgCost:
+          totalCalls > 0
+            ? Math.round((totalCost / totalCalls) * 100) / 100
+            : 0,
+        totalDurationSeconds: totalDuration,
+        avgDurationSeconds:
+          totalCalls > 0 ? Math.round(totalDuration / totalCalls) : 0,
+      },
+      dailyStats: dailyStatsArray,
+    };
+
+    setCachedResponse(cacheKey, payload);
+
     res.json({
       success: true,
-      data: {
-        summary: {
-          totalCalls,
-          successfulCalls,
-          successRate:
-            totalCalls > 0 ? Math.round((successfulCalls / totalCalls) * 100) : 0,
-          totalCost: Math.round(totalCost * 100) / 100,
-          avgCost:
-            totalCalls > 0 ? Math.round((totalCost / totalCalls) * 100) / 100 : 0,
-          totalDurationSeconds: totalDuration,
-          avgDurationSeconds:
-            totalCalls > 0 ? Math.round(totalDuration / totalCalls) : 0,
-        },
-        dailyStats: dailyStatsArray,
-      },
+      data: payload,
     });
   })
 );
@@ -1566,6 +1647,12 @@ router.get(
     }
     where.user_sentiment = { not: null };
 
+    const cacheKey = `analytics-sentiment:${agentId || "all"}`;
+    const cached = getCachedResponse(cacheKey);
+    if (cached) {
+      return res.json({ success: true, data: cached });
+    }
+
     // Get sentiment distribution
     const sentimentStats = await prisma.call.groupBy({
       by: ["user_sentiment"],
@@ -1589,12 +1676,16 @@ router.get(
       return acc;
     }, {});
 
+    const payload = {
+      totalCallsWithSentiment: totalWithSentiment,
+      sentimentDistribution,
+    };
+
+    setCachedResponse(cacheKey, payload);
+
     res.json({
       success: true,
-      data: {
-        totalCallsWithSentiment: totalWithSentiment,
-        sentimentDistribution,
-      },
+      data: payload,
     });
   })
 );
@@ -2069,6 +2160,131 @@ router.get(
 // ============================================
 
 /**
+ * GET /api/dashboard/overview
+ * Combined stats + analytics overview for faster dashboard loads
+ */
+router.get(
+  "/overview",
+  asyncHandler(async (req, res) => {
+    const isUserScoped = req.user?.role === "USER";
+    let assignedAgentIds = null;
+    if (isUserScoped) {
+      assignedAgentIds = await getAssignedAgentIds(req.user.id);
+      if (assignedAgentIds.length === 0) {
+        return res.json({
+          success: true,
+          data: {
+            stats: {
+              agents: { total: 0, active: 0, inactive: 0 },
+              calls: { total: 0 },
+              cost: { total: 0 },
+            },
+            analytics: {
+              totalCalls: 0,
+              totalCost: 0,
+              avgCost: 0,
+              successfulCalls: 0,
+              successRate: 0,
+              totalAgents: 0,
+              totalDurationSeconds: 0,
+              avgDurationSeconds: 0,
+              callsByStatus: {},
+            },
+          },
+        });
+      }
+    }
+
+    const cacheKey = `dashboard-overview:${req.user?.id || "anon"}:${
+      assignedAgentIds ? assignedAgentIds.join(",") : "all"
+    }`;
+    const cached = getCachedResponse(cacheKey);
+    if (cached) {
+      return res.json({ success: true, data: cached });
+    }
+
+    const agentWhere = assignedAgentIds
+      ? { agent_id: { in: assignedAgentIds } }
+      : {};
+    const callWhere = assignedAgentIds
+      ? { agent_id: { in: assignedAgentIds } }
+      : {};
+
+    const [agentCounts, callAggregate, successCounts, callsByStatus] =
+      await Promise.all([
+        prisma.agent.groupBy({
+          by: ["status"],
+          where: agentWhere,
+          _count: { _all: true },
+        }),
+        prisma.call.aggregate({
+          where: callWhere,
+          _count: { _all: true },
+          _sum: { cost: true, duration_seconds: true },
+        }),
+        prisma.call.groupBy({
+          by: ["call_successful"],
+          where: callWhere,
+          _count: { _all: true },
+        }),
+        prisma.call.groupBy({
+          by: ["call_status"],
+          where: callWhere,
+          _count: { _all: true },
+        }),
+      ]);
+
+    const totalAgents = agentCounts.reduce(
+      (sum, row) => sum + (row._count._all || 0),
+      0
+    );
+    const activeAgents =
+      agentCounts.find((row) => row.status === "ACTIVE")?._count._all || 0;
+    const totalCalls = callAggregate._count._all || 0;
+    const totalCost = callAggregate._sum.cost || 0;
+    const totalDuration = callAggregate._sum.duration_seconds || 0;
+    const successfulCalls =
+      successCounts.find((row) => row.call_successful)?._count._all || 0;
+
+    const avgDuration =
+      totalCalls > 0 ? Math.round(totalDuration / totalCalls) : 0;
+    const successRate =
+      totalCalls > 0 ? (successfulCalls / totalCalls) * 100 : 0;
+    const avgCost = totalCalls > 0 ? totalCost / totalCalls : 0;
+
+    const payload = {
+      stats: {
+        agents: {
+          total: totalAgents,
+          active: activeAgents,
+          inactive: totalAgents - activeAgents,
+        },
+        calls: { total: totalCalls },
+        cost: { total: totalCost },
+      },
+      analytics: {
+        totalCalls,
+        totalCost,
+        avgCost: Math.round(avgCost * 100) / 100,
+        successfulCalls,
+        successRate: Math.round(successRate * 100) / 100,
+        totalAgents: activeAgents,
+        totalDurationSeconds: totalDuration,
+        avgDurationSeconds: avgDuration,
+        callsByStatus: callsByStatus.reduce((acc, item) => {
+          acc[item.call_status] = item._count._all;
+          return acc;
+        }, {}),
+      },
+    };
+
+    setCachedResponse(cacheKey, payload);
+
+    res.json({ success: true, data: payload });
+  })
+);
+
+/**
  * GET /api/dashboard/stats
  * Get quick statistics
  */
@@ -2099,6 +2315,14 @@ router.get(
       }
     }
 
+    const cacheKey = `stats:${req.user?.id || "anon"}:${
+      assignedAgentIds ? assignedAgentIds.join(",") : "all"
+    }`;
+    const cached = getCachedResponse(cacheKey);
+    if (cached) {
+      return res.json({ success: true, data: cached });
+    }
+
     const agentCounts = await prisma.agent.groupBy({
       by: ["status"],
       where: assignedAgentIds ? { agent_id: { in: assignedAgentIds } } : {},
@@ -2119,21 +2343,25 @@ router.get(
     const totalCalls = callAggregate._count._all || 0;
     const totalCost = callAggregate._sum.cost || 0;
 
+    const payload = {
+      agents: {
+        total: totalAgents,
+        active: activeAgents,
+        inactive: totalAgents - activeAgents,
+      },
+      calls: {
+        total: totalCalls,
+      },
+      cost: {
+        total: totalCost,
+      },
+    };
+
+    setCachedResponse(cacheKey, payload);
+
     res.json({
       success: true,
-      data: {
-        agents: {
-          total: totalAgents,
-          active: activeAgents,
-          inactive: totalAgents - activeAgents,
-        },
-        calls: {
-          total: totalCalls,
-        },
-        cost: {
-          total: totalCost,
-        },
-      },
+      data: payload,
     });
   })
 );
