@@ -836,6 +836,26 @@ router.post(
     });
 
     try {
+      const assignments = await prisma.userAgent.findMany({
+        where: { agent_id: value.agentId },
+        select: {
+          user: {
+            select: {
+              phone: true,
+              phone_verified_at: true,
+              status: true,
+            },
+          },
+        },
+      });
+      const smsRecipients = assignments
+        .map((assignment) => assignment.user)
+        .filter(
+          (user) =>
+            user?.phone && user?.phone_verified_at && user.status === "APPROVED"
+        )
+        .map((user) => user.phone);
+
       await sendNewLeadSms({
         name: value.name,
         email: value.email,
@@ -847,7 +867,7 @@ router.post(
         reason: value.reason,
         agentName: resolvedAgentName || value.agentName,
         status: value.status,
-      });
+      }, smsRecipients);
     } catch (error) {
       logger.error("Failed to send lead SMS", { error: error.message });
     }
@@ -872,7 +892,30 @@ router.get(
     }
 
     const { limit, offset, status } = value;
+    const isUserScoped = req.user?.role === "USER";
+    let assignedAgentIds = null;
+    if (isUserScoped) {
+      assignedAgentIds = await getAssignedAgentIds(req.user.id);
+      if (assignedAgentIds.length === 0) {
+        return res.json({
+          success: true,
+          data: {
+            leads: [],
+            pagination: {
+              total: 0,
+              limit,
+              offset,
+              hasMore: false,
+            },
+          },
+        });
+      }
+    }
+
     const where = {};
+    if (assignedAgentIds) {
+      where.agent_id = { in: assignedAgentIds };
+    }
     if (status) {
       where.status = leadStatusMap[status] || "NEW";
     }
@@ -1600,6 +1643,8 @@ router.get(
           id: true,
           email: true,
           name: true,
+          phone: true,
+          phone_verified_at: true,
           role: true,
           status: true,
           created_at: true,
@@ -1644,6 +1689,8 @@ router.get(
         id: true,
         email: true,
         name: true,
+        phone: true,
+        phone_verified_at: true,
         role: true,
         status: true,
         created_at: true,

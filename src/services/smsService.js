@@ -1,8 +1,6 @@
 import twilio from "twilio";
 import { logger } from "../lib/logger.js";
 
-const DESTINATION_NUMBER = "+14374509656";
-
 const formatVisitTime = (visitTime) => {
   if (!visitTime) {
     return "N/A";
@@ -34,7 +32,10 @@ const buildLeadMessage = (payload) => {
   ].join("\n");
 };
 
-export const sendNewLeadSms = async (payload) => {
+const buildVerificationMessage = (code) =>
+  `Your AIVOX verification code is ${code}. It expires in 10 minutes.`;
+
+const getTwilioClient = () => {
   const sid = process.env.TWILIO_ACCOUNT_SID;
   const token = process.env.TWILIO_AUTH_TOKEN;
   const fromNumber = process.env.TWILIO_FROM_NUMBER;
@@ -45,15 +46,46 @@ export const sendNewLeadSms = async (payload) => {
       hasToken: Boolean(token),
       hasFromNumber: Boolean(fromNumber),
     });
+    return null;
+  }
+
+  return { client: twilio(sid, token), fromNumber };
+};
+
+const sendSmsBatch = async (recipients, body) => {
+  const twilioContext = getTwilioClient();
+  if (!twilioContext) {
     return { skipped: true };
   }
 
-  const client = twilio(sid, token);
-  const body = buildLeadMessage(payload);
+  const { client, fromNumber } = twilioContext;
+  const targets = (recipients || []).filter(Boolean);
+  if (targets.length === 0) {
+    return { skipped: true };
+  }
 
-  return client.messages.create({
-    to: DESTINATION_NUMBER,
-    from: fromNumber,
-    body,
-  });
+  const results = await Promise.allSettled(
+    targets.map((to) => client.messages.create({ to, from: fromNumber, body }))
+  );
+
+  const sent = results.filter((result) => result.status === "fulfilled").length;
+  const failed = results.length - sent;
+  if (failed > 0) {
+    logger.warn("Some SMS messages failed", { sent, failed });
+  }
+
+  return { sent, failed };
+};
+
+export const sendNewLeadSms = async (payload, recipients) => {
+  const body = buildLeadMessage(payload);
+  return sendSmsBatch(recipients, body);
+};
+
+export const sendPhoneVerificationSms = async (phone, code) => {
+  if (!phone) {
+    return { skipped: true };
+  }
+  const body = buildVerificationMessage(code);
+  return sendSmsBatch([phone], body);
 };
