@@ -5,14 +5,17 @@ const formatVisitTime = (visitTime) => {
   if (!visitTime) {
     return "N/A";
   }
-  if (visitTime instanceof Date) {
-    return visitTime.toISOString();
+  const parsed = visitTime instanceof Date ? visitTime : new Date(visitTime);
+  if (Number.isNaN(parsed.getTime())) {
+    return String(visitTime);
   }
-  const parsed = new Date(visitTime);
-  if (!Number.isNaN(parsed.getTime())) {
-    return parsed.toISOString();
-  }
-  return String(visitTime);
+  return new Intl.DateTimeFormat("en-US", {
+    year: "numeric",
+    month: "short",
+    day: "2-digit",
+    hour: "numeric",
+    minute: "2-digit",
+  }).format(parsed);
 };
 
 const buildLeadMessage = (payload) => {
@@ -26,7 +29,6 @@ const buildLeadMessage = (payload) => {
     `Address: ${safe(payload.address)}`,
     `Visit Time: ${formatVisitTime(payload.visitTime)}`,
     `Reason: ${safe(payload.reason)}`,
-    `Agent ID: ${safe(payload.agentId)}`,
     `Agent Name: ${safe(payload.agentName)}`,
     `Status: ${safe(payload.status)}`,
   ].join("\n");
