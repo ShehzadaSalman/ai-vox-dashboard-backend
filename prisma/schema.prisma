@@ -21,6 +21,7 @@ model User {
   role         UserRole   @default(USER)
   status       UserStatus @default(APPROVED)
   assignments  UserAgent[]
+  subscriptions Subscription[]
 
   @@map("users")
 }
@@ -100,6 +101,40 @@ model Lead {
   @@index([status])
   @@index([created_at])
   @@map("leads")
+}
+
+model Plan {
+  id                     String   @id @default(cuid())
+  code                   String   @unique
+  name                   String
+  monthly_minutes_limit  Int
+  price_cents            Int
+  is_active              Boolean  @default(true)
+  created_at             DateTime @default(now())
+  updated_at             DateTime @updatedAt
+  subscriptions          Subscription[]
+
+  @@index([code])
+  @@index([is_active])
+  @@map("plans")
+}
+
+model Subscription {
+  id                   String   @id @default(cuid())
+  user_id              String
+  plan_id              String
+  status               String
+  current_period_start DateTime
+  current_period_end   DateTime
+  created_at           DateTime @default(now())
+  updated_at           DateTime @updatedAt
+  user                 User     @relation(fields: [user_id], references: [id], onDelete: Cascade)
+  plan                 Plan     @relation(fields: [plan_id], references: [id], onDelete: Restrict)
+
+  @@index([user_id])
+  @@index([plan_id])
+  @@index([status])
+  @@map("subscriptions")
 }
 
 enum AgentStatus {

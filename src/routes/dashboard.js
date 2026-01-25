@@ -2285,6 +2285,99 @@ router.get(
 );
 
 /**
+ * GET /api/dashboard/plan-usage
+ * Plan and usage summary for the current user
+ */
+router.get(
+  "/plan-usage",
+  asyncHandler(async (req, res) => {
+    const now = new Date();
+    const subscription = await prisma.subscription.findFirst({
+      where: {
+        user_id: req.user.id,
+        status: { in: ["active", "ACTIVE"] },
+        current_period_start: { lte: now },
+        current_period_end: { gte: now },
+      },
+      include: { plan: true },
+      orderBy: { current_period_end: "desc" },
+    });
+
+    if (!subscription || !subscription.plan) {
+      return res.json({
+        success: true,
+        data: {
+          plan: null,
+          subscription: null,
+          usage: {
+            used_seconds: 0,
+            used_minutes: 0,
+            limit_minutes: null,
+            remaining_minutes: null,
+            usage_percent: null,
+            period_start: null,
+            period_end: null,
+          },
+        },
+      });
+    }
+
+    const assignedAgentIds = await getAssignedAgentIds(req.user.id);
+    const periodStart = subscription.current_period_start;
+    const periodEnd = subscription.current_period_end;
+
+    let usedSeconds = 0;
+    if (assignedAgentIds.length) {
+      const usageAggregate = await prisma.call.aggregate({
+        where: {
+          agent_id: { in: assignedAgentIds },
+          created_at: { gte: periodStart, lte: periodEnd },
+        },
+        _sum: { duration_seconds: true },
+      });
+      usedSeconds = usageAggregate._sum.duration_seconds || 0;
+    }
+
+    const usedMinutes = Math.round((usedSeconds / 60) * 10) / 10;
+    const limitMinutes = subscription.plan.monthly_minutes_limit || 0;
+    const remainingMinutes = limitMinutes
+      ? Math.max(limitMinutes - usedMinutes, 0)
+      : null;
+    const usagePercent = limitMinutes
+      ? Math.min((usedMinutes / limitMinutes) * 100, 100)
+      : null;
+
+    res.json({
+      success: true,
+      data: {
+        plan: {
+          id: subscription.plan.id,
+          code: subscription.plan.code,
+          name: subscription.plan.name,
+          monthly_minutes_limit: subscription.plan.monthly_minutes_limit,
+          price_cents: subscription.plan.price_cents,
+        },
+        subscription: {
+          id: subscription.id,
+          status: subscription.status,
+          current_period_start: periodStart,
+          current_period_end: periodEnd,
+        },
+        usage: {
+          used_seconds: usedSeconds,
+          used_minutes: usedMinutes,
+          limit_minutes: limitMinutes,
+          remaining_minutes: remainingMinutes,
+          usage_percent: usagePercent,
+          period_start: periodStart,
+          period_end: periodEnd,
+        },
+      },
+    });
+  })
+);
+
+/**
  * GET /api/dashboard/stats
  * Get quick statistics
  */
