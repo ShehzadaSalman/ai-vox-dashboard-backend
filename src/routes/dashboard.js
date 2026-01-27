@@ -62,6 +62,20 @@ const normalizeRetellAgents = (agents) => {
   return Array.from(agentMap.values());
 };
 
+const serializeIntegration = (integration) => {
+  if (!integration) {
+    return null;
+  }
+  const apiKey = integration.api_key || "";
+  return {
+    provider: integration.provider,
+    hasApiKey: Boolean(apiKey),
+    apiKeyLast4: apiKey ? apiKey.slice(-4) : null,
+    config: integration.config || {},
+    updatedAt: integration.updated_at,
+  };
+};
+
 // Validation schemas
 const syncCallsSchema = Joi.object({
   agentId: Joi.string().optional(),
@@ -119,6 +133,13 @@ const updateUserSchema = Joi.object({
   name: Joi.string().max(120).optional(),
   role: Joi.string().valid("USER", "ADMIN", "SUPERADMIN").optional(),
   status: Joi.string().valid("PENDING", "APPROVED", "REJECTED").optional(),
+});
+
+const integrationProviders = new Set(["calcom"]);
+
+const integrationUpsertSchema = Joi.object({
+  apiKey: Joi.string().allow("").optional(),
+  config: Joi.object().unknown(true).optional(),
 });
 
 const agentAssignmentSchema = Joi.object({
@@ -1686,6 +1707,104 @@ router.get(
     res.json({
       success: true,
       data: payload,
+    });
+  })
+);
+
+// ============================================
+// INTEGRATIONS (User scoped)
+// ============================================
+
+/**
+ * GET /api/dashboard/integrations/:provider
+ * Get integration settings for the current user
+ */
+router.get(
+  "/integrations/:provider",
+  asyncHandler(async (req, res) => {
+    const { provider } = req.params;
+
+    if (!integrationProviders.has(provider)) {
+      throw new ValidationError("Unsupported integration provider");
+    }
+
+    const integration = await prisma.integration.findUnique({
+      where: {
+        user_id_provider: {
+          user_id: req.user.id,
+          provider,
+        },
+      },
+    });
+
+    res.json({
+      success: true,
+      data: serializeIntegration(integration),
+    });
+  })
+);
+
+/**
+ * PUT /api/dashboard/integrations/:provider
+ * Upsert integration settings for the current user
+ */
+router.put(
+  "/integrations/:provider",
+  asyncHandler(async (req, res) => {
+    const { provider } = req.params;
+    const { error, value } = integrationUpsertSchema.validate(req.body, {
+      abortEarly: false,
+      stripUnknown: true,
+    });
+
+    if (error) {
+      throw new ValidationError(error.details[0].message);
+    }
+
+    if (!integrationProviders.has(provider)) {
+      throw new ValidationError("Unsupported integration provider");
+    }
+
+    const existing = await prisma.integration.findUnique({
+      where: {
+        user_id_provider: {
+          user_id: req.user.id,
+          provider,
+        },
+      },
+    });
+
+    const nextConfig = value.config
+      ? { ...(existing?.config || {}), ...value.config }
+      : existing?.config || {};
+
+    let nextApiKey = existing?.api_key || null;
+    if (typeof value.apiKey === "string") {
+      nextApiKey = value.apiKey.trim() ? value.apiKey.trim() : null;
+    }
+
+    const integration = await prisma.integration.upsert({
+      where: {
+        user_id_provider: {
+          user_id: req.user.id,
+          provider,
+        },
+      },
+      update: {
+        api_key: nextApiKey,
+        config: nextConfig,
+      },
+      create: {
+        user_id: req.user.id,
+        provider,
+        api_key: nextApiKey,
+        config: nextConfig,
+      },
+    });
+
+    res.json({
+      success: true,
+      data: serializeIntegration(integration),
     });
   })
 );

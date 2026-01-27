@@ -22,6 +22,7 @@ model User {
   status       UserStatus @default(APPROVED)
   assignments  UserAgent[]
   subscriptions Subscription[]
+  integrations Integration[]
 
   @@map("users")
 }
@@ -135,6 +136,21 @@ model Subscription {
   @@index([plan_id])
   @@index([status])
   @@map("subscriptions")
+}
+
+model Integration {
+  id         String   @id @default(cuid())
+  user_id    String
+  provider   String
+  api_key    String?
+  config     Json?
+  created_at DateTime @default(now())
+  updated_at DateTime @updatedAt
+  user       User     @relation(fields: [user_id], references: [id], onDelete: Cascade)
+
+  @@unique([user_id, provider])
+  @@index([user_id])
+  @@map("integrations")
 }
 
 enum AgentStatus {

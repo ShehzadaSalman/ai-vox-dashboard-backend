@@ -8,6 +8,7 @@ import { ensureSuperAdmin } from "./lib/superadmin.js";
 import { errorHandler } from "./middleware/errorHandler.js";
 import { authMiddleware } from "./middleware/auth.js";
 import authRoutes from "./routes/auth.js";
+import calcomRoutes from "./routes/calcom.js";
 import dashboardRoutes from "./routes/dashboard.js";
 import webhookRoutes from "./routes/webhooks.js";
 
@@ -56,12 +57,13 @@ app.get("/health", (req, res) => {
   res.json({
     status: "healthy",
     timestamp: new Date().toISOString(),
-    uptime: process.uptime(),
   });
 });
 
 // Public auth routes
 app.use("/api/auth", authRoutes);
+// Public Cal.com routes
+app.use("/api", calcomRoutes);
 // Public webhook routes
 app.use("/webhooks", webhookRoutes);
 
