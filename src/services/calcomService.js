@@ -11,12 +11,11 @@ const getCalcomBaseUrl = () => {
   }
   return base;
 };
-const CALCOM_API_KEY = process.env.CALCOM_API_KEY;
 const CALCOM_API_VERSION = "2024-08-13";
 
-const getClient = () => {
-  if (!CALCOM_API_KEY) {
-    const error = new Error("CALCOM_API_KEY is not configured");
+const getClient = (apiKey) => {
+  if (!apiKey) {
+    const error = new Error("Cal.com API key is not configured");
     error.code = "CALCOM_AUTH_MISSING";
     throw error;
   }
@@ -24,7 +23,7 @@ const getClient = () => {
   return axios.create({
     baseURL: getCalcomBaseUrl(),
     headers: {
-      Authorization: `Bearer ${CALCOM_API_KEY}`,
+      Authorization: `Bearer ${apiKey}`,
       "cal-api-version": CALCOM_API_VERSION,
     },
   });
@@ -92,14 +91,14 @@ const normalizeBooking = (payload) => {
 };
 
 export const calcomService = {
-  async testConnection() {
-    const client = getClient();
+  async testConnection(apiKey) {
+    const client = getClient(apiKey);
     const response = await client.get("/v2/me");
     return response.data;
   },
 
-  async getAvailableSlots({ eventTypeId, startTime, endTime, timeZone }) {
-    const client = getClient();
+  async getAvailableSlots({ apiKey, eventTypeId, startTime, endTime, timeZone }) {
+    const client = getClient(apiKey);
     const response = await client.get("/slots/available", {
       params: {
         eventTypeId,
@@ -113,8 +112,8 @@ export const calcomService = {
     return flattenSlots(slotsRaw);
   },
 
-  async reserveSlot(payload) {
-    const client = getClient();
+  async reserveSlot(apiKey, payload) {
+    const client = getClient(apiKey);
     try {
       const attendee = payload?.attendee || {};
       const timeZone = attendee.timeZone || attendee.timezone;
@@ -148,14 +147,14 @@ export const calcomService = {
     }
   },
 
-  async updateReservation(reservationId, payload) {
-    const client = getClient();
+  async updateReservation(apiKey, reservationId, payload) {
+    const client = getClient(apiKey);
     const response = await client.patch(`/v2/bookings/${reservationId}`, payload);
     return normalizeBooking(response.data);
   },
 
-  async listBookings(params = {}) {
-    const client = getClient();
+  async listBookings(apiKey, params = {}) {
+    const client = getClient(apiKey);
     const response = await client.get("/v2/bookings", { params });
     return response.data;
   },

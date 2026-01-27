@@ -1,5 +1,6 @@
 import { validationResult } from "express-validator";
 import { calcomService } from "../services/calcomService.js";
+import { prisma } from "../lib/database.js";
 
 const handleValidation = (req) => {
   const result = validationResult(req);
@@ -8,6 +9,24 @@ const handleValidation = (req) => {
     error.status = 400;
     throw error;
   }
+};
+
+const getUserCalcomKey = async (userId) => {
+  const integration = await prisma.integration.findUnique({
+    where: {
+      user_id_provider: {
+        user_id: userId,
+        provider: "calcom",
+      },
+    },
+  });
+  const apiKey = integration?.api_key || "";
+  if (!apiKey) {
+    const error = new Error("Cal.com API key not set");
+    error.status = 400;
+    throw error;
+  }
+  return apiKey;
 };
 
 const formatDateParts = (date, timeZone) => {
@@ -39,7 +58,8 @@ export const calcomController = {
   async getTestCalcom(req, res, next) {
     try {
       const timestamp = new Date().toISOString();
-      await calcomService.testConnection();
+      const apiKey = await getUserCalcomKey(req.user.id);
+      await calcomService.testConnection(apiKey);
       res.json({
         status: "connected",
         timestamp,
@@ -74,12 +94,14 @@ export const calcomController = {
   async getAvailableSlots(req, res, next) {
     try {
       handleValidation(req);
+      const apiKey = await getUserCalcomKey(req.user.id);
       const { eventTypeId, start, end, timezone } = req.query;
       const startTime = start || new Date().toISOString();
       const endTime =
         end ||
         new Date(Date.now() + 15 * 24 * 60 * 60 * 1000).toISOString();
       const slots = await calcomService.getAvailableSlots({
+        apiKey,
         eventTypeId,
         startTime,
         endTime,
@@ -101,7 +123,8 @@ export const calcomController = {
   async reserveSlot(req, res, next) {
     try {
       handleValidation(req);
-      const reservation = await calcomService.reserveSlot(req.body);
+      const apiKey = await getUserCalcomKey(req.user.id);
+      const reservation = await calcomService.reserveSlot(apiKey, req.body);
       res.json(reservation);
     } catch (error) {
       next(error);
@@ -112,7 +135,9 @@ export const calcomController = {
     try {
       handleValidation(req);
       const { reservationId } = req.params;
+      const apiKey = await getUserCalcomKey(req.user.id);
       const reservation = await calcomService.updateReservation(
+        apiKey,
         reservationId,
         req.body
       );
@@ -125,6 +150,7 @@ export const calcomController = {
   async listBookings(req, res, next) {
     try {
       handleValidation(req);
+      const apiKey = await getUserCalcomKey(req.user.id);
       const { take, skip, status, eventTypeId, userId } = req.query;
       const params = {};
       if (take !== undefined) {
@@ -142,7 +168,7 @@ export const calcomController = {
       if (userId) {
         params.userId = userId;
       }
-      const data = await calcomService.listBookings(params);
+      const data = await calcomService.listBookings(apiKey, params);
       res.json(data);
     } catch (error) {
       next(error);

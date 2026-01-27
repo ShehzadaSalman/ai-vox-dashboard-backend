@@ -1,17 +1,16 @@
 import express from "express";
 import { query, body, param } from "express-validator";
 import { calcomController } from "../controllers/calcomController.js";
+import { authMiddleware } from "../middleware/auth.js";
 
 const router = express.Router();
 
 router.get("/health", calcomController.getHealth);
-router.get("/test-calcom", calcomController.getTestCalcom);
+router.get("/date", query("timezone").optional().isString().withMessage("timezone must be a string"), calcomController.getDate);
 
-router.get(
-  "/date",
-  query("timezone").optional().isString().withMessage("timezone must be a string"),
-  calcomController.getDate
-);
+router.use(authMiddleware);
+
+router.get("/test-calcom", calcomController.getTestCalcom);
 
 router.get(
   "/bookings",
