@@ -74,6 +74,7 @@ const normalizeBooking = (payload) => {
   const end = booking.end || booking.endTime || booking.end_time;
   const eventTypeId =
     booking.eventTypeId || booking.eventType?.id || booking.event_type_id;
+  const meetingUrl = booking.meetingUrl || booking.location || booking.meeting_url;
   const attendee = booking.attendees?.[0] || booking.attendee || {};
   return {
     reservationId: booking.id || booking.bookingId || booking.uid || "",
@@ -82,6 +83,7 @@ const normalizeBooking = (payload) => {
       start: start || null,
       end: end || null,
       eventTypeId: eventTypeId ? String(eventTypeId) : null,
+      meetingUrl: meetingUrl || null,
     },
     attendee: {
       name: attendee.name || null,

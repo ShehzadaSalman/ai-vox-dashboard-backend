@@ -37,6 +37,12 @@ const buildLeadMessage = (payload) => {
 const buildVerificationMessage = (code) =>
   `Your AIVOX verification code is ${code}. It expires in 10 minutes.`;
 
+const buildAppointmentMessage = (payload) => {
+  const safe = (value) => (value ? String(value) : "N/A");
+  const formattedTime = formatVisitTime(payload.visitTime);
+  return `Hey ${safe(payload.name)} This is a confirmation message that our Technical Expert would be coming at "${formattedTime}"`;
+};
+
 const getTwilioClient = () => {
   const sid = process.env.TWILIO_ACCOUNT_SID;
   const token = process.env.TWILIO_AUTH_TOKEN;
@@ -89,5 +95,13 @@ export const sendPhoneVerificationSms = async (phone, code) => {
     return { skipped: true };
   }
   const body = buildVerificationMessage(code);
+  return sendSmsBatch([phone], body);
+};
+
+export const sendAppointmentConfirmationSms = async (phone, payload) => {
+  if (!phone) {
+    return { skipped: true };
+  }
+  const body = buildAppointmentMessage(payload);
   return sendSmsBatch([phone], body);
 };

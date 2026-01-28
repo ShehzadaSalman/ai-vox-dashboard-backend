@@ -4,7 +4,7 @@ import { prisma } from "../lib/database.js";
 import { retellAPI } from "../lib/retell.js";
 import { logger } from "../lib/logger.js";
 import { calcomService } from "../services/calcomService.js";
-import { sendNewLeadSms } from "../services/smsService.js";
+import { sendNewLeadSms, sendAppointmentConfirmationSms } from "../services/smsService.js";
 import {
   asyncHandler,
   ValidationError,
@@ -960,7 +960,7 @@ router.post(
         const startIso = new Date(value.visitTime).toISOString();
         const timeZone = config.timeZone || "UTC";
 
-        await calcomService.reserveSlot(integration.api_key, {
+        const booking = await calcomService.reserveSlot(integration.api_key, {
           eventTypeId: String(config.eventTypeId),
           start: startIso,
           attendee: {
@@ -976,6 +976,11 @@ router.post(
             company: value.company,
             agentId: value.agentId,
           },
+        });
+
+        await sendAppointmentConfirmationSms(value.phone, {
+          name: value.name,
+          visitTime: startIso,
         });
       }
     } catch (error) {
