@@ -3,6 +3,7 @@ import Joi from "joi";
 import { prisma } from "../lib/database.js";
 import { retellAPI } from "../lib/retell.js";
 import { logger } from "../lib/logger.js";
+import { calcomService } from "../services/calcomService.js";
 import { sendNewLeadSms } from "../services/smsService.js";
 import {
   asyncHandler,
@@ -889,6 +890,7 @@ router.post(
       const assignments = await prisma.userAgent.findMany({
         where: { agent_id: value.agentId },
         select: {
+          user_id: true,
           user: {
             select: {
               phone: true,
@@ -920,6 +922,66 @@ router.post(
       }, smsRecipients);
     } catch (error) {
       logger.error("Failed to send lead SMS", { error: error.message });
+    }
+
+    try {
+      const assignments = await prisma.userAgent.findMany({
+        where: { agent_id: value.agentId },
+        select: { user_id: true },
+      });
+      const userIds = assignments.map((assignment) => assignment.user_id);
+
+      for (const userId of userIds) {
+        const integration = await prisma.integration.findUnique({
+          where: {
+            user_id_provider: {
+              user_id: userId,
+              provider: "calcom",
+            },
+          },
+        });
+
+        if (!integration?.api_key) {
+          continue;
+        }
+
+        const config = integration.config || {};
+        if (!config.autoCreateAppointments) {
+          continue;
+        }
+
+        if (!value.email || !config.eventTypeId) {
+          continue;
+        }
+
+        if (!value.visitTime) {
+          continue;
+        }
+        const startIso = new Date(value.visitTime).toISOString();
+        const timeZone = config.timeZone || "UTC";
+
+        await calcomService.reserveSlot(integration.api_key, {
+          eventTypeId: String(config.eventTypeId),
+          start: startIso,
+          attendee: {
+            name: value.name,
+            email: value.email,
+            timeZone,
+          },
+          metadata: {
+            leadId: lead.id,
+            phone: value.phone,
+            address: value.address,
+            reason: value.reason,
+            company: value.company,
+            agentId: value.agentId,
+          },
+        });
+      }
+    } catch (error) {
+      logger.error("Failed to auto-create appointment", {
+        error: error.message,
+      });
     }
 
     res.status(201).json({

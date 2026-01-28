@@ -151,7 +151,28 @@ export const calcomController = {
     try {
       handleValidation(req);
       const apiKey = await getUserCalcomKey(req.user.id);
-      const { take, skip, status, eventTypeId, userId } = req.query;
+      const {
+        take,
+        skip,
+        status,
+        attendeeEmail,
+        attendeeName,
+        bookingUid,
+        eventTypeIds,
+        eventTypeId,
+        teamsIds,
+        teamId,
+        afterStart,
+        beforeStart,
+        afterCreatedAt,
+        beforeCreatedAt,
+        afterUpdatedAt,
+        beforeUpdatedAt,
+        sortStart,
+        sortEnd,
+        sortCreated,
+        sortUpdatedAt,
+      } = req.query;
       const params = {};
       if (take !== undefined) {
         params.take = Number(take);
@@ -162,12 +183,23 @@ export const calcomController = {
       if (status) {
         params.status = status;
       }
-      if (eventTypeId) {
-        params.eventTypeId = eventTypeId;
-      }
-      if (userId) {
-        params.userId = userId;
-      }
+      if (attendeeEmail) params.attendeeEmail = attendeeEmail;
+      if (attendeeName) params.attendeeName = attendeeName;
+      if (bookingUid) params.bookingUid = bookingUid;
+      if (eventTypeIds) params.eventTypeIds = eventTypeIds;
+      if (eventTypeId) params.eventTypeId = eventTypeId;
+      if (teamsIds) params.teamsIds = teamsIds;
+      if (teamId) params.teamId = teamId;
+      if (afterStart) params.afterStart = afterStart;
+      if (beforeStart) params.beforeStart = beforeStart;
+      if (afterCreatedAt) params.afterCreatedAt = afterCreatedAt;
+      if (beforeCreatedAt) params.beforeCreatedAt = beforeCreatedAt;
+      if (afterUpdatedAt) params.afterUpdatedAt = afterUpdatedAt;
+      if (beforeUpdatedAt) params.beforeUpdatedAt = beforeUpdatedAt;
+      if (sortStart) params.sortStart = sortStart;
+      if (sortEnd) params.sortEnd = sortEnd;
+      if (sortCreated) params.sortCreated = sortCreated;
+      if (sortUpdatedAt) params.sortUpdatedAt = sortUpdatedAt;
       const data = await calcomService.listBookings(apiKey, params);
       res.json(data);
     } catch (error) {

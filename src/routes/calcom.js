@@ -23,8 +23,23 @@ router.get(
     .isInt({ min: 0 })
     .withMessage("skip must be a number"),
   query("status").optional().isString(),
+  query("attendeeEmail").optional().isString(),
+  query("attendeeName").optional().isString(),
+  query("bookingUid").optional().isString(),
+  query("eventTypeIds").optional().isString(),
   query("eventTypeId").optional().isString(),
-  query("userId").optional().isString(),
+  query("teamsIds").optional().isString(),
+  query("teamId").optional().isString(),
+  query("afterStart").optional().isISO8601().withMessage("afterStart must be ISO8601"),
+  query("beforeStart").optional().isISO8601().withMessage("beforeStart must be ISO8601"),
+  query("afterCreatedAt").optional().isISO8601().withMessage("afterCreatedAt must be ISO8601"),
+  query("beforeCreatedAt").optional().isISO8601().withMessage("beforeCreatedAt must be ISO8601"),
+  query("afterUpdatedAt").optional().isISO8601().withMessage("afterUpdatedAt must be ISO8601"),
+  query("beforeUpdatedAt").optional().isISO8601().withMessage("beforeUpdatedAt must be ISO8601"),
+  query("sortStart").optional().isIn(["asc", "desc"]),
+  query("sortEnd").optional().isIn(["asc", "desc"]),
+  query("sortCreated").optional().isIn(["asc", "desc"]),
+  query("sortUpdatedAt").optional().isIn(["asc", "desc"]),
   calcomController.listBookings
 );
 

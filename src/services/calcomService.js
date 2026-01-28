@@ -156,6 +156,7 @@ export const calcomService = {
   async listBookings(apiKey, params = {}) {
     const client = getClient(apiKey);
     const response = await client.get("/v2/bookings", { params });
+    console.log("Cal.com bookings response", response.data);
     return response.data;
   },
 };
