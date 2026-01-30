@@ -1,4 +1,4 @@
-import twilio from "twilio";
+import axios from "axios";
 import { logger } from "../lib/logger.js";
 
 const formatVisitTime = (visitTime) => {
@@ -40,49 +40,80 @@ const buildVerificationMessage = (code) =>
 const buildAppointmentMessage = (payload) => {
   const safe = (value) => (value ? String(value) : "N/A");
   const formattedTime = formatVisitTime(payload.visitTime);
-  return `Hey ${safe(payload.name)} This is a confirmation message that our Technical Expert would be coming at "${formattedTime}"`;
+  const link = payload?.calLink ? String(payload.calLink) : "";
+  const linkLine = link ? `In case you'd want to change the visit time, you can do so at: ${link}` : "";
+  return [
+    `Hey ${safe(payload.name)}, your appointment has been confirmed.`,
+    `Our Technician should arrive there at ${formattedTime}.`,
+    linkLine,
+  ]
+    .filter(Boolean)
+    .join(" ");
 };
 
-const getTwilioClient = () => {
-  const sid = process.env.TWILIO_ACCOUNT_SID;
-  const token = process.env.TWILIO_AUTH_TOKEN;
-  const fromNumber = process.env.TWILIO_FROM_NUMBER;
+const getClickSendClient = () => {
+  const username = process.env.CLICK_SEND_USERNAME;
+  const apiKey = process.env.CLICK_SEND_API_KEY;
+  const baseUrl = process.env.CLICK_SEND_BASE_URL || "https://rest.clicksend.com/v3";
+  const fromNumber = process.env.CLICK_SEND_PHONE_NUMBER;
 
-  if (!sid || !token || !fromNumber) {
-    logger.warn("Twilio SMS not configured", {
-      hasSid: Boolean(sid),
-      hasToken: Boolean(token),
+  if (!username || !apiKey || !baseUrl || !fromNumber) {
+    logger.warn("ClickSend SMS not configured", {
+      hasUsername: Boolean(username),
+      hasApiKey: Boolean(apiKey),
+      hasBaseUrl: Boolean(baseUrl),
       hasFromNumber: Boolean(fromNumber),
     });
     return null;
   }
 
-  return { client: twilio(sid, token), fromNumber };
+  const sanitizedBaseUrl = baseUrl.replace(/\/+$/, "");
+  const client = axios.create({
+    baseURL: sanitizedBaseUrl,
+    auth: { username, password: apiKey },
+    headers: { "Content-Type": "application/json" },
+    timeout: 10000,
+  });
+
+  return { client, fromNumber };
 };
 
 const sendSmsBatch = async (recipients, body) => {
-  const twilioContext = getTwilioClient();
-  if (!twilioContext) {
+  const clickSendContext = getClickSendClient();
+  if (!clickSendContext) {
     return { skipped: true };
   }
 
-  const { client, fromNumber } = twilioContext;
+  const { client, fromNumber } = clickSendContext;
   const targets = (recipients || []).filter(Boolean);
   if (targets.length === 0) {
     return { skipped: true };
   }
 
-  const results = await Promise.allSettled(
-    targets.map((to) => client.messages.create({ to, from: fromNumber, body }))
-  );
+  const messages = targets.map((to) => ({
+    to,
+    from: fromNumber,
+    body,
+    source: "aivox-dashboard",
+  }));
 
-  const sent = results.filter((result) => result.status === "fulfilled").length;
-  const failed = results.length - sent;
-  if (failed > 0) {
-    logger.warn("Some SMS messages failed", { sent, failed });
+  try {
+    const response = await client.post("/sms/send", { messages });
+    const responseCode = response?.data?.response_code;
+    if (responseCode && responseCode !== "SUCCESS") {
+      logger.warn("ClickSend SMS response not successful", {
+        responseCode,
+        responseMsg: response?.data?.response_msg,
+      });
+    }
+    return { sent: targets.length, failed: 0 };
+  } catch (error) {
+    logger.error("ClickSend SMS send failed", {
+      message: error?.message,
+      data: error?.response?.data,
+    });
+    return { sent: 0, failed: targets.length };
   }
-
-  return { sent, failed };
 };
 
 export const sendNewLeadSms = async (payload, recipients) => {

@@ -110,9 +110,10 @@ Set these in Netlify (use your real values):
 - `JWT_SECRET`
 - `NODE_ENV=production`
 - `ALLOWED_ORIGINS` (optional, comma-separated)
-- `TWILIO_ACCOUNT_SID` (required for lead SMS)
-- `TWILIO_AUTH_TOKEN` (required for lead SMS)
-- `TWILIO_FROM_NUMBER` (required for lead SMS)
+- `CLICK_SEND_USERNAME` (required for SMS)
+- `CLICK_SEND_API_KEY` (required for SMS)
+- `CLICK_SEND_PHONE_NUMBER` (required for SMS)
+- `CLICK_SEND_BASE_URL` (optional, defaults to `https://rest.clicksend.com/v3`)
 
 #### `GET /api/dashboard/agent-info/:agentId`
 

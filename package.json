@@ -40,7 +40,6 @@
     "prisma": "^5.7.1",
     "retell-sdk": "^4.66.0",
     "serverless-http": "^3.2.0",
-    "twilio": "^5.6.1",
     "winston": "^3.11.0"
   },
   "devDependencies": {

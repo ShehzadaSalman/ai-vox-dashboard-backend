@@ -978,9 +978,19 @@ router.post(
           },
         });
 
+        const bookingStart = booking?.eventDetails?.start || startIso;
+        const calLinkRaw = config.calLink || "";
+        const calLink =
+          calLinkRaw && /^https?:\/\//i.test(calLinkRaw)
+            ? calLinkRaw
+            : calLinkRaw
+              ? `https://cal.com/${calLinkRaw.replace(/^\/+/, "")}`
+              : "";
+
         await sendAppointmentConfirmationSms(value.phone, {
           name: value.name,
-          visitTime: startIso,
+          visitTime: bookingStart,
+          calLink,
         });
       }
     } catch (error) {
