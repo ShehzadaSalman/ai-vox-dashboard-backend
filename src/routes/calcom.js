@@ -43,6 +43,12 @@ router.get(
   calcomController.listBookings
 );
 
+router.delete(
+  "/bookings/:reservationId",
+  param("reservationId").notEmpty().withMessage("reservationId is required"),
+  calcomController.cancelBooking
+);
+
 router.get(
   "/slots/available",
   query("eventTypeId").notEmpty().withMessage("eventTypeId is required"),

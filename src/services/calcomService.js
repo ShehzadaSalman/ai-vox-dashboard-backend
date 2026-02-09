@@ -157,8 +157,39 @@ export const calcomService = {
 
   async listBookings(apiKey, params = {}) {
     const client = getClient(apiKey);
-    const response = await client.get("/v2/bookings", { params });
-    console.log("Cal.com bookings response", response.data);
-    return response.data;
+    try {
+      const response = await client.get("/v2/bookings", { params });
+      console.log("Cal.com bookings response", response.data);
+      return response.data;
+    } catch (error) {
+      const status = error.response?.status;
+      const data = error.response?.data;
+      const message = data?.message || JSON.stringify(data) || error.message;
+      const wrapped = new Error(
+        `Cal.com error${status ? ` (${status})` : ""}: ${message}`
+      );
+      wrapped.status = status || 500;
+      throw wrapped;
+    }
+  },
+
+  async cancelBooking(apiKey, bookingUid, payload = {}) {
+    const client = getClient(apiKey);
+    try {
+      const response = await client.post(
+        `/v2/bookings/${bookingUid}/cancel`,
+        payload
+      );
+      return response.data || { success: true };
+    } catch (error) {
+      const status = error.response?.status;
+      const data = error.response?.data;
+      const message = data?.message || JSON.stringify(data) || error.message;
+      const wrapped = new Error(
+        `Cal.com error${status ? ` (${status})` : ""}: ${message}`
+      );
+      wrapped.status = status || 500;
+      throw wrapped;
+    }
   },
 };

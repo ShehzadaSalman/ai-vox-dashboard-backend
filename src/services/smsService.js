@@ -43,13 +43,15 @@ const buildAppointmentMessage = (payload) => {
   const link = payload?.calLink ? String(payload.calLink) : "";
   const linkLine = link ? `In case you'd want to change the visit time, you can do so at: ${link}` : "";
   return [
-    `Hey ${safe(payload.name)}, your appointment has been confirmed.`,
-    `Our Technician should arrive there at ${formattedTime}.`,
+    `Hey ${safe(payload.name)}, your appointment has been confirmed at ${formattedTime}.`,
     linkLine,
   ]
     .filter(Boolean)
     .join(" ");
 };
+
+const buildAccountApprovedMessage = () =>
+  "Your account has been approved with sisteme voice. Please login at: https://aivox-dashboard.vercel.app/";
 
 const getClickSendClient = () => {
   const username = process.env.CLICK_SEND_USERNAME;
@@ -78,14 +80,35 @@ const getClickSendClient = () => {
   return { client, fromNumber };
 };
 
-const sendSmsBatch = async (recipients, body) => {
+const normalizeCountryCode = (value) => {
+  if (!value) return "";
+  const trimmed = String(value).trim().replace(/\s+/g, "");
+  if (!trimmed) return "";
+  return trimmed.startsWith("+") ? trimmed : `+${trimmed}`;
+};
+
+const normalizePhone = (value, defaultCountryCode = "") => {
+  if (!value) return "";
+  const trimmed = String(value).trim().replace(/\s+/g, "");
+  if (!trimmed) return "";
+  if (trimmed.startsWith("+")) {
+    return trimmed;
+  }
+  const normalizedCode = normalizeCountryCode(defaultCountryCode);
+  return normalizedCode ? `${normalizedCode}${trimmed}` : trimmed;
+};
+
+const sendSmsBatch = async (recipients, body, options = {}) => {
+  const defaultCountryCode = options?.defaultCountryCode || "";
   const clickSendContext = getClickSendClient();
   if (!clickSendContext) {
     return { skipped: true };
   }
 
   const { client, fromNumber } = clickSendContext;
-  const targets = (recipients || []).filter(Boolean);
+  const targets = (recipients || [])
+    .map((phone) => normalizePhone(phone, defaultCountryCode))
+    .filter((phone) => phone.length > 0);
   if (targets.length === 0) {
     return { skipped: true };
   }
@@ -99,6 +122,7 @@ const sendSmsBatch = async (recipients, body) => {
 
   try {
     const response = await client.post("/sms/send", { messages });
+    console.log("Response for SMS: ", response?.data, messages);
     const responseCode = response?.data?.response_code;
     if (responseCode && responseCode !== "SUCCESS") {
       logger.warn("ClickSend SMS response not successful", {
@@ -116,23 +140,35 @@ const sendSmsBatch = async (recipients, body) => {
   }
 };
 
-export const sendNewLeadSms = async (payload, recipients) => {
+export const sendNewLeadSms = async (payload, recipients, options = {}) => {
   const body = buildLeadMessage(payload);
-  return sendSmsBatch(recipients, body);
+  return sendSmsBatch(recipients, body, options);
 };
 
-export const sendPhoneVerificationSms = async (phone, code) => {
+export const sendPhoneVerificationSms = async (phone, code, options = {}) => {
   if (!phone) {
     return { skipped: true };
   }
   const body = buildVerificationMessage(code);
-  return sendSmsBatch([phone], body);
+  return sendSmsBatch([phone], body, options);
 };
 
-export const sendAppointmentConfirmationSms = async (phone, payload) => {
+export const sendAppointmentConfirmationSms = async (
+  phone,
+  payload,
+  options = {}
+) => {
   if (!phone) {
     return { skipped: true };
   }
   const body = buildAppointmentMessage(payload);
-  return sendSmsBatch([phone], body);
+  return sendSmsBatch([phone], body, options);
+};
+
+export const sendAccountApprovedSms = async (phone, options = {}) => {
+  if (!phone) {
+    return { skipped: true };
+  }
+  const body = buildAccountApprovedMessage();
+  return sendSmsBatch([phone], body, options);
 };

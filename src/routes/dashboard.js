@@ -4,7 +4,11 @@ import { prisma } from "../lib/database.js";
 import { retellAPI } from "../lib/retell.js";
 import { logger } from "../lib/logger.js";
 import { calcomService } from "../services/calcomService.js";
-import { sendNewLeadSms, sendAppointmentConfirmationSms } from "../services/smsService.js";
+import {
+  sendNewLeadSms,
+  sendAppointmentConfirmationSms,
+  sendAccountApprovedSms,
+} from "../services/smsService.js";
 import {
   asyncHandler,
   ValidationError,
@@ -136,7 +140,7 @@ const updateUserSchema = Joi.object({
   status: Joi.string().valid("PENDING", "APPROVED", "REJECTED").optional(),
 });
 
-const integrationProviders = new Set(["calcom"]);
+const integrationProviders = new Set(["calcom", "sms"]);
 
 const integrationUpsertSchema = Joi.object({
   apiKey: Joi.string().allow("").optional(),
@@ -950,7 +954,7 @@ router.post(
           continue;
         }
 
-        if (!value.email || !config.eventTypeId) {
+        if (!config.eventTypeId) {
           continue;
         }
 
@@ -960,12 +964,16 @@ router.post(
         const startIso = new Date(value.visitTime).toISOString();
         const timeZone = config.timeZone || "UTC";
 
+        const attendeeEmail =
+          value.email ||
+          `no-email+lead-${lead.id}-${userId}@example.com`;
+
         const booking = await calcomService.reserveSlot(integration.api_key, {
           eventTypeId: String(config.eventTypeId),
           start: startIso,
           attendee: {
             name: value.name,
-            email: value.email,
+            email: attendeeEmail,
             timeZone,
           },
           metadata: {
@@ -986,11 +994,22 @@ router.post(
             : calLinkRaw
               ? `https://cal.com/${calLinkRaw.replace(/^\/+/, "")}`
               : "";
+        const smsIntegration = await prisma.integration.findUnique({
+          where: {
+            user_id_provider: {
+              user_id: userId,
+              provider: "sms",
+            },
+          },
+        });
+        const defaultCountryCode = smsIntegration?.config?.defaultCountryCode;
 
         await sendAppointmentConfirmationSms(value.phone, {
           name: value.name,
           visitTime: bookingStart,
           calLink,
+        }, {
+          defaultCountryCode,
         });
       }
     } catch (error) {
@@ -2109,7 +2128,36 @@ router.post(
       },
     });
 
-    res.json({ success: true, data: updated });
+    const smsIntegration = await prisma.integration.findUnique({
+      where: {
+        user_id_provider: {
+          user_id: req.user.id,
+          provider: "sms",
+        },
+      },
+    });
+    const defaultCountryCode = smsIntegration?.config?.defaultCountryCode;
+
+    let smsResult = null;
+    try {
+      smsResult = await sendAccountApprovedSms(existing.phone, {
+        defaultCountryCode,
+      });
+      if (smsResult?.failed > 0) {
+        logger.warn("Account approved SMS failed", {
+          userId: existing.id,
+          result: smsResult,
+        });
+      }
+    } catch (smsError) {
+      smsResult = { failed: 1, error: smsError?.message };
+      logger.warn("Failed to send account approved SMS", {
+        userId: existing.id,
+        message: smsError?.message,
+      });
+    }
+
+    res.json({ success: true, data: updated, sms: smsResult });
   })
 );
 

@@ -1,6 +1,8 @@
 import { validationResult } from "express-validator";
 import { calcomService } from "../services/calcomService.js";
+import { sendAppointmentConfirmationSms } from "../services/smsService.js";
 import { prisma } from "../lib/database.js";
+import { logger } from "../lib/logger.js";
 
 const handleValidation = (req) => {
   const result = validationResult(req);
@@ -45,6 +47,21 @@ const formatDateParts = (date, timeZone) => {
   return `${get("year")}-${get("month")}-${get("day")}T${get("hour")}:${get(
     "minute"
   )}:${get("second")}`;
+};
+
+const filterActiveBookings = (data) => {
+  if (Array.isArray(data?.data)) {
+    return { ...data, data: data.data.filter(isActiveBooking) };
+  }
+  if (Array.isArray(data?.bookings)) {
+    return { ...data, bookings: data.bookings.filter(isActiveBooking) };
+  }
+  return data;
+};
+
+const isActiveBooking = (booking) => {
+  const status = (booking?.status || "").toLowerCase();
+  return status === "confirmed" || status === "pending";
 };
 
 export const calcomController = {
@@ -125,6 +142,49 @@ export const calcomController = {
       handleValidation(req);
       const apiKey = await getUserCalcomKey(req.user.id);
       const reservation = await calcomService.reserveSlot(apiKey, req.body);
+      try {
+        const phone = req.body?.metadata?.phone;
+        const attendeeName = req.body?.attendee?.name || "there";
+        const visitTime =
+          reservation?.eventDetails?.start || req.body?.start;
+        const integration = await prisma.integration.findUnique({
+          where: {
+            user_id_provider: {
+              user_id: req.user.id,
+              provider: "calcom",
+            },
+          },
+        });
+        const config = integration?.config || {};
+        const calLinkRaw = config.calLink || "";
+        const calLink =
+          calLinkRaw && /^https?:\/\//i.test(calLinkRaw)
+            ? calLinkRaw
+            : calLinkRaw
+              ? `https://cal.com/${calLinkRaw.replace(/^\/+/, "")}`
+              : "";
+        const smsIntegration = await prisma.integration.findUnique({
+          where: {
+            user_id_provider: {
+              user_id: req.user.id,
+              provider: "sms",
+            },
+          },
+        });
+        const defaultCountryCode = smsIntegration?.config?.defaultCountryCode;
+        await sendAppointmentConfirmationSms(phone, {
+          name: attendeeName,
+          visitTime,
+          calLink,
+        }, {
+          defaultCountryCode,
+        });
+      } catch (smsError) {
+        logger.warn("Failed to send appointment confirmation SMS", {
+          message: smsError?.message,
+          leadId: req.body?.metadata?.leadId,
+        });
+      }
       res.json(reservation);
     } catch (error) {
       next(error);
@@ -201,7 +261,21 @@ export const calcomController = {
       if (sortCreated) params.sortCreated = sortCreated;
       if (sortUpdatedAt) params.sortUpdatedAt = sortUpdatedAt;
       const data = await calcomService.listBookings(apiKey, params);
-      res.json(data);
+      res.json(filterActiveBookings(data));
+    } catch (error) {
+      next(error);
+    }
+  },
+
+  async cancelBooking(req, res, next) {
+    try {
+      handleValidation(req);
+      const { reservationId } = req.params;
+      const apiKey = await getUserCalcomKey(req.user.id);
+      const result = await calcomService.cancelBooking(apiKey, reservationId, {
+        cancellationReason: "Removed from dashboard",
+      });
+      res.json(result);
     } catch (error) {
       next(error);
     }
