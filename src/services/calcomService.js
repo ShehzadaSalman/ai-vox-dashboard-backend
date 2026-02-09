@@ -159,7 +159,6 @@ export const calcomService = {
     const client = getClient(apiKey);
     try {
       const response = await client.get("/v2/bookings", { params });
-      console.log("Cal.com bookings response", response.data);
       return response.data;
     } catch (error) {
       const status = error.response?.status;

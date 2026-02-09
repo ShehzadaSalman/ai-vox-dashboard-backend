@@ -49,20 +49,6 @@ const formatDateParts = (date, timeZone) => {
   )}:${get("second")}`;
 };
 
-const filterActiveBookings = (data) => {
-  if (Array.isArray(data?.data)) {
-    return { ...data, data: data.data.filter(isActiveBooking) };
-  }
-  if (Array.isArray(data?.bookings)) {
-    return { ...data, bookings: data.bookings.filter(isActiveBooking) };
-  }
-  return data;
-};
-
-const isActiveBooking = (booking) => {
-  const status = (booking?.status || "").toLowerCase();
-  return status === "confirmed" || status === "pending";
-};
 
 export const calcomController = {
   getHealth(req, res) {
@@ -261,7 +247,7 @@ export const calcomController = {
       if (sortCreated) params.sortCreated = sortCreated;
       if (sortUpdatedAt) params.sortUpdatedAt = sortUpdatedAt;
       const data = await calcomService.listBookings(apiKey, params);
-      res.json(filterActiveBookings(data));
+      res.json(data);
     } catch (error) {
       next(error);
     }

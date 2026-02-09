@@ -121,8 +121,9 @@ const sendSmsBatch = async (recipients, body, options = {}) => {
   }));
 
   try {
+    console.log("Sending the SMS to the payload: ", messages);
     const response = await client.post("/sms/send", { messages });
-    console.log("Response for SMS: ", response?.data, messages);
+    console.log("Response for SMS: ", response?.data?.data);
     const responseCode = response?.data?.response_code;
     if (responseCode && responseCode !== "SUCCESS") {
       logger.warn("ClickSend SMS response not successful", {
