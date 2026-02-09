@@ -113,6 +113,11 @@ const updateAgentSchema = Joi.object({
   status: Joi.string().valid("ACTIVE", "INACTIVE").optional(),
 });
 
+const planAssignmentSchema = Joi.object({
+  planCode: Joi.string().min(1).required(),
+  periodDays: Joi.number().integer().min(1).max(365).default(30),
+});
+
 const callsListSchema = Joi.object({
   limit: Joi.number().integer().min(1).max(100).default(20),
   offset: Joi.number().integer().min(0).default(0),
@@ -2158,6 +2163,108 @@ router.post(
     }
 
     res.json({ success: true, data: updated, sms: smsResult });
+  })
+);
+
+/**
+ * GET /api/dashboard/plans
+ * List plans (superadmin only)
+ */
+router.get(
+  "/plans",
+  superAdminMiddleware,
+  asyncHandler(async (req, res) => {
+    const plans = await prisma.plan.findMany({
+      orderBy: { monthly_minutes_limit: "asc" },
+      select: {
+        id: true,
+        code: true,
+        name: true,
+        monthly_minutes_limit: true,
+        price_cents: true,
+        is_active: true,
+      },
+    });
+
+    res.json({ success: true, data: plans });
+  })
+);
+
+/**
+ * POST /api/dashboard/users/:userId/plan
+ * Assign a plan to a user (superadmin only)
+ */
+router.post(
+  "/users/:userId/plan",
+  superAdminMiddleware,
+  asyncHandler(async (req, res) => {
+    const { userId } = req.params;
+    const { error, value } = planAssignmentSchema.validate(req.body);
+    if (error) {
+      throw new ValidationError(error.details[0].message);
+    }
+
+    if (!userId) {
+      throw new ValidationError("User ID is required");
+    }
+
+    const user = await prisma.user.findUnique({
+      where: { id: userId },
+      select: { id: true, role: true },
+    });
+
+    if (!user) {
+      throw new NotFoundError(`User with ID ${userId} not found`);
+    }
+
+    if (user.role !== "USER") {
+      throw new ValidationError("Plans can only be assigned to normal users");
+    }
+
+    const plan = await prisma.plan.findFirst({
+      where: { code: { equals: value.planCode, mode: "insensitive" } },
+    });
+
+    if (!plan) {
+      throw new NotFoundError(`Plan ${value.planCode} not found`);
+    }
+
+    const now = new Date();
+    const periodEnd = new Date(
+      now.getTime() + value.periodDays * 24 * 60 * 60 * 1000
+    );
+
+    await prisma.subscription.updateMany({
+      where: {
+        user_id: userId,
+        status: { in: ["active", "ACTIVE"] },
+      },
+      data: { status: "cancelled" },
+    });
+
+    const subscription = await prisma.subscription.create({
+      data: {
+        user_id: userId,
+        plan_id: plan.id,
+        status: "active",
+        current_period_start: now,
+        current_period_end: periodEnd,
+      },
+    });
+
+    res.status(201).json({
+      success: true,
+      data: {
+        subscription,
+        plan: {
+          id: plan.id,
+          code: plan.code,
+          name: plan.name,
+          monthly_minutes_limit: plan.monthly_minutes_limit,
+          price_cents: plan.price_cents,
+        },
+      },
+    });
   })
 );
 

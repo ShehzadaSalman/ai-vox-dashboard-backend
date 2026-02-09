@@ -95,6 +95,9 @@ const normalizePhone = (value, defaultCountryCode = "") => {
     return trimmed;
   }
   const normalizedCode = normalizeCountryCode(defaultCountryCode);
+  if (trimmed.startsWith("0") && normalizedCode) {
+    return `${normalizedCode}${trimmed.replace(/^0+/, "")}`;
+  }
   return normalizedCode ? `${normalizedCode}${trimmed}` : trimmed;
 };
 
