@@ -4,6 +4,7 @@ import bcrypt from "bcryptjs";
 import jwt from "jsonwebtoken";
 import { prisma } from "../lib/database.js";
 import { sendPhoneVerificationSms } from "../services/smsService.js";
+import { sendPasswordResetEmail } from "../services/emailService.js";
 import {
   asyncHandler,
   ValidationError,
@@ -39,6 +40,21 @@ const phoneStartSchema = Joi.object({
 const phoneVerifySchema = Joi.object({
   email: Joi.string().email().required(),
   code: Joi.string().length(6).required(),
+});
+
+const passwordResetStartSchema = Joi.object({
+  email: Joi.string().email().required(),
+});
+
+const passwordResetVerifySchema = Joi.object({
+  email: Joi.string().email().required(),
+  code: Joi.string().length(6).required(),
+});
+
+const passwordResetCompleteSchema = Joi.object({
+  email: Joi.string().email().required(),
+  code: Joi.string().length(6).required(),
+  password: Joi.string().min(8).max(128).required(),
 });
 
 const generateVerificationCode = () =>
@@ -228,6 +244,123 @@ router.post(
       success: true,
       message: "Phone number verified.",
     });
+  })
+);
+
+router.post(
+  "/password/email/start",
+  asyncHandler(async (req, res) => {
+    const { error, value } = passwordResetStartSchema.validate(req.body, {
+      abortEarly: false,
+      stripUnknown: true,
+    });
+    if (error) {
+      throw new ValidationError(error.details[0].message);
+    }
+
+    const { email } = value;
+    const user = await prisma.user.findUnique({ where: { email } });
+    if (!user) {
+      return res.json({
+        success: true,
+        message: "If that account exists, a reset code was sent.",
+      });
+    }
+
+    const resetCode = generateVerificationCode();
+    const resetExpiresAt = new Date(Date.now() + 10 * 60 * 1000);
+
+    await prisma.user.update({
+      where: { email },
+      data: {
+        password_reset_code: resetCode,
+        password_reset_expires_at: resetExpiresAt,
+      },
+    });
+
+    await sendPasswordResetEmail({ to: email, code: resetCode });
+
+    res.json({
+      success: true,
+      message: "If that account exists, a reset code was sent.",
+    });
+  })
+);
+
+router.post(
+  "/password/email/verify",
+  asyncHandler(async (req, res) => {
+    const { error, value } = passwordResetVerifySchema.validate(req.body, {
+      abortEarly: false,
+      stripUnknown: true,
+    });
+    if (error) {
+      throw new ValidationError(error.details[0].message);
+    }
+
+    const { email, code } = value;
+    const user = await prisma.user.findUnique({ where: { email } });
+    if (!user) {
+      return res.json({ success: true, verified: false });
+    }
+
+    if (!user.password_reset_code || !user.password_reset_expires_at) {
+      throw new ValidationError("No reset code requested");
+    }
+
+    if (user.password_reset_code !== code) {
+      throw new ValidationError("Invalid reset code");
+    }
+
+    if (new Date(user.password_reset_expires_at).getTime() < Date.now()) {
+      throw new ValidationError("Reset code expired");
+    }
+
+    res.json({ success: true, verified: true });
+  })
+);
+
+router.post(
+  "/password/email/complete",
+  asyncHandler(async (req, res) => {
+    const { error, value } = passwordResetCompleteSchema.validate(req.body, {
+      abortEarly: false,
+      stripUnknown: true,
+    });
+    if (error) {
+      throw new ValidationError(error.details[0].message);
+    }
+
+    const { email, code, password } = value;
+    const user = await prisma.user.findUnique({ where: { email } });
+    if (!user) {
+      throw new ValidationError("Invalid reset request");
+    }
+
+    if (!user.password_reset_code || !user.password_reset_expires_at) {
+      throw new ValidationError("No reset code requested");
+    }
+
+    if (user.password_reset_code !== code) {
+      throw new ValidationError("Invalid reset code");
+    }
+
+    if (new Date(user.password_reset_expires_at).getTime() < Date.now()) {
+      throw new ValidationError("Reset code expired");
+    }
+
+    const passwordHash = await bcrypt.hash(password, 12);
+
+    await prisma.user.update({
+      where: { email },
+      data: {
+        passwordHash,
+        password_reset_code: null,
+        password_reset_expires_at: null,
+      },
+    });
+
+    res.json({ success: true, message: "Password reset successfully." });
   })
 );
 
