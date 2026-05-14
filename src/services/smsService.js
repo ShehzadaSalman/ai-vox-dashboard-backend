@@ -35,7 +35,7 @@ const buildLeadMessage = (payload) => {
 };
 
 const buildVerificationMessage = (code) =>
-  `Your AIVOX verification code is ${code}. It expires in 10 minutes.`;
+  `Your Candibly verification code is ${code}. It expires in 10 minutes.`;
 
 const buildAppointmentMessage = (payload) => {
   const safe = (value) => (value ? String(value) : "N/A");

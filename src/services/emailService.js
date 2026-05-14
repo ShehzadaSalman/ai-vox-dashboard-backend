@@ -1,62 +1,49 @@
-import nodemailer from "nodemailer";
+import { Resend } from "resend";
 import { logger } from "../lib/logger.js";
 
-const getEmailTransport = () => {
-  const host = process.env.EMAIL_HOST;
-  const port = Number(process.env.EMAIL_PORT || 465);
-  const user = process.env.EMAIL_USER;
-  const pass = process.env.EMAIL_PASS;
-  const secure = String(process.env.EMAIL_SECURE || "true").toLowerCase() === "true";
-
-  if (!host || !user || !pass) {
-    logger.warn("Email service not configured", {
-      hasHost: Boolean(host),
-      hasUser: Boolean(user),
-      hasPass: Boolean(pass),
-    });
+const getClient = () => {
+  const apiKey = process.env.RESEND_API_KEY;
+  if (!apiKey) {
+    logger.warn("Email service not configured", { hasApiKey: false });
     return null;
   }
-
-  return nodemailer.createTransport({
-    host,
-    port,
-    secure,
-    auth: { user, pass },
-  });
+  return new Resend(apiKey);
 };
 
 export const sendEmail = async ({ to, subject, text, html, replyTo }) => {
-  const transporter = getEmailTransport();
-  if (!transporter) {
+  const resend = getClient();
+  if (!resend) {
     return { skipped: true };
   }
 
-  const from = process.env.EMAIL_FROM || process.env.EMAIL_USER;
+  const from = process.env.EMAIL_FROM;
 
   try {
-    const info = await transporter.sendMail({
+    const { data, error } = await resend.emails.send({
       from,
       to,
       subject,
-      text,
-      html,
-      replyTo,
+      ...(html ? { html } : {}),
+      ...(text ? { text } : {}),
+      ...(replyTo ? { reply_to: replyTo } : {}),
     });
 
-    return { sent: true, messageId: info.messageId };
+    if (error) {
+      logger.error("Email send failed", { error });
+      return { sent: false };
+    }
+
+    return { sent: true, messageId: data.id };
   } catch (error) {
-    logger.error("Email send failed", {
-      message: error?.message,
-      code: error?.code,
-      response: error?.response,
-    });
+    logger.error("Email send failed", { message: error?.message });
     return { sent: false };
   }
 };
 
 export const sendPasswordResetEmail = async ({ to, code }) => {
-  const subject = "Your Sisteme Voice password reset code";
+  const subject = "Your Candibly Voice password reset code";
   const text = `Your password reset verification code is ${code}. This code will expire in 10 minutes. If you did not request a password reset, please ignore this message.`;
 
   return sendEmail({ to, subject, text });
 };
+
