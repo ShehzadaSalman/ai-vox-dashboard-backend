@@ -3,8 +3,7 @@ import Joi from "joi";
 import bcrypt from "bcryptjs";
 import jwt from "jsonwebtoken";
 import { prisma } from "../lib/database.js";
-import { sendPhoneVerificationSms } from "../services/smsService.js";
-import { sendPasswordResetEmail } from "../services/emailService.js";
+import { sendPasswordResetEmail, sendEmailVerificationCode } from "../services/emailService.js";
 import {
   asyncHandler,
   ValidationError,
@@ -136,16 +135,16 @@ router.post(
     });
 
     try {
-      await sendPhoneVerificationSms(phone, verificationCode);
-    } catch (smsError) {
-      // Don't block registration if SMS fails
+      await sendEmailVerificationCode({ to: email, code: verificationCode });
+    } catch (emailError) {
+      // Don't block registration if email fails
     }
 
     res.status(201).json({
       success: true,
       data: user,
       message:
-        "Your account is pending approval by a superadmin. A phone verification code was sent to your number.",
+        "Your account is pending approval by a superadmin. A verification code was sent to your email.",
     });
   })
 );
@@ -193,11 +192,11 @@ router.post(
       },
     });
 
-    await sendPhoneVerificationSms(phoneToUse, verificationCode);
+    await sendEmailVerificationCode({ to: email, code: verificationCode });
 
     res.json({
       success: true,
-      message: "Verification code sent.",
+      message: "Verification code sent to your email.",
     });
   })
 );

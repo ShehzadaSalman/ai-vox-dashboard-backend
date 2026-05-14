@@ -47,3 +47,10 @@ export const sendPasswordResetEmail = async ({ to, code }) => {
   return sendEmail({ to, subject, text });
 };
 
+export const sendEmailVerificationCode = async ({ to, code }) => {
+  const subject = "Your Candibly verification code";
+  const text = `Your Candibly verification code is ${code}. It expires in 10 minutes.`;
+
+  return sendEmail({ to, subject, text });
+};
+

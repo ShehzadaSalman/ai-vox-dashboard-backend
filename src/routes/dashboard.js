@@ -10,6 +10,11 @@ import {
   sendAccountApprovedSms,
 } from "../services/smsService.js";
 import {
+  sendNewLeadPush,
+  sendAppointmentPush,
+  sendAccountApprovedPush,
+} from "../services/pushNotificationService.js";
+import {
   asyncHandler,
   ValidationError,
   NotFoundError,
@@ -902,6 +907,7 @@ router.post(
           user_id: true,
           user: {
             select: {
+              id: true,
               phone: true,
               phone_verified_at: true,
               status: true,
@@ -909,15 +915,17 @@ router.post(
           },
         },
       });
-      const smsRecipients = assignments
-        .map((assignment) => assignment.user)
-        .filter(
-          (user) =>
-            user?.phone && user?.phone_verified_at && user.status === "APPROVED"
-        )
-        .map((user) => user.phone);
+      const approvedUsers = assignments
+        .map((a) => a.user)
+        .filter((u) => u?.status === "APPROVED");
 
-      await sendNewLeadSms({
+      const smsRecipients = approvedUsers
+        .filter((u) => u?.phone && u?.phone_verified_at)
+        .map((u) => u.phone);
+
+      const pushRecipients = approvedUsers.map((u) => u.id);
+
+      const leadPayload = {
         name: value.name,
         email: value.email,
         phone: value.phone,
@@ -928,9 +936,14 @@ router.post(
         reason: value.reason,
         agentName: resolvedAgentName || value.agentName,
         status: value.status,
-      }, smsRecipients);
+      };
+
+      await Promise.allSettled([
+        sendNewLeadSms(leadPayload, smsRecipients),
+        sendNewLeadPush(leadPayload, pushRecipients),
+      ]);
     } catch (error) {
-      logger.error("Failed to send lead SMS", { error: error.message });
+      logger.error("Failed to send lead notifications", { error: error.message });
     }
 
     try {
@@ -1009,13 +1022,11 @@ router.post(
         });
         const defaultCountryCode = smsIntegration?.config?.defaultCountryCode;
 
-        await sendAppointmentConfirmationSms(value.phone, {
-          name: value.name,
-          visitTime: bookingStart,
-          calLink,
-        }, {
-          defaultCountryCode,
-        });
+        const appointmentPayload = { name: value.name, visitTime: bookingStart, calLink };
+        await Promise.allSettled([
+          sendAppointmentConfirmationSms(value.phone, appointmentPayload, { defaultCountryCode }),
+          sendAppointmentPush(value.phone, appointmentPayload, [userId]),
+        ]);
       }
     } catch (error) {
       logger.error("Failed to auto-create appointment", {
@@ -2143,26 +2154,15 @@ router.post(
     });
     const defaultCountryCode = smsIntegration?.config?.defaultCountryCode;
 
-    let smsResult = null;
-    try {
-      smsResult = await sendAccountApprovedSms(existing.phone, {
-        defaultCountryCode,
-      });
-      if (smsResult?.failed > 0) {
-        logger.warn("Account approved SMS failed", {
-          userId: existing.id,
-          result: smsResult,
-        });
-      }
-    } catch (smsError) {
-      smsResult = { failed: 1, error: smsError?.message };
-      logger.warn("Failed to send account approved SMS", {
-        userId: existing.id,
-        message: smsError?.message,
-      });
-    }
+    const [smsSettled, pushSettled] = await Promise.allSettled([
+      sendAccountApprovedSms(existing.phone, { defaultCountryCode }),
+      sendAccountApprovedPush(existing.id),
+    ]);
 
-    res.json({ success: true, data: updated, sms: smsResult });
+    const smsResult = smsSettled.status === "fulfilled" ? smsSettled.value : { failed: 1, error: smsSettled.reason?.message };
+    const pushResult = pushSettled.status === "fulfilled" ? pushSettled.value : { failed: 1, error: pushSettled.reason?.message };
+
+    res.json({ success: true, data: updated, sms: smsResult, push: pushResult });
   })
 );
 

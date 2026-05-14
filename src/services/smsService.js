@@ -1,4 +1,4 @@
-import axios from "axios";
+import twilio from "twilio";
 import { logger } from "../lib/logger.js";
 
 const formatVisitTime = (visitTime) => {
@@ -51,33 +51,23 @@ const buildAppointmentMessage = (payload) => {
 };
 
 const buildAccountApprovedMessage = () =>
-  "Your account has been approved with sisteme voice. Please login at: https://aivox-dashboard.vercel.app/";
+  "Your account has been approved with Candibly. Please login at: https://aivox-dashboard.vercel.app/";
 
-const getClickSendClient = () => {
-  const username = process.env.CLICK_SEND_USERNAME;
-  const apiKey = process.env.CLICK_SEND_API_KEY;
-  const baseUrl = process.env.CLICK_SEND_BASE_URL || "https://rest.clicksend.com/v3";
-  const fromNumber = process.env.CLICK_SEND_PHONE_NUMBER;
+const getTwilioClient = () => {
+  const accountSid = process.env.TWILIO_ACCOUNT_SID;
+  const authToken = process.env.TWILIO_AUTH_TOKEN;
+  const fromNumber = process.env.TWILIO_FROM_NUMBER;
 
-  if (!username || !apiKey || !baseUrl || !fromNumber) {
-    logger.warn("ClickSend SMS not configured", {
-      hasUsername: Boolean(username),
-      hasApiKey: Boolean(apiKey),
-      hasBaseUrl: Boolean(baseUrl),
+  if (!accountSid || !authToken || !fromNumber) {
+    logger.warn("Twilio SMS not configured", {
+      hasAccountSid: Boolean(accountSid),
+      hasAuthToken: Boolean(authToken),
       hasFromNumber: Boolean(fromNumber),
     });
     return null;
   }
 
-  const sanitizedBaseUrl = baseUrl.replace(/\/+$/, "");
-  const client = axios.create({
-    baseURL: sanitizedBaseUrl,
-    auth: { username, password: apiKey },
-    headers: { "Content-Type": "application/json" },
-    timeout: 10000,
-  });
-
-  return { client, fromNumber };
+  return { client: twilio(accountSid, authToken), fromNumber };
 };
 
 const normalizeCountryCode = (value) => {
@@ -103,12 +93,12 @@ const normalizePhone = (value, defaultCountryCode = "") => {
 
 const sendSmsBatch = async (recipients, body, options = {}) => {
   const defaultCountryCode = options?.defaultCountryCode || "";
-  const clickSendContext = getClickSendClient();
-  if (!clickSendContext) {
+  const twilioContext = getTwilioClient();
+  if (!twilioContext) {
     return { skipped: true };
   }
 
-  const { client, fromNumber } = clickSendContext;
+  const { client, fromNumber } = twilioContext;
   const targets = (recipients || [])
     .map((phone) => normalizePhone(phone, defaultCountryCode))
     .filter((phone) => phone.length > 0);
@@ -116,32 +106,23 @@ const sendSmsBatch = async (recipients, body, options = {}) => {
     return { skipped: true };
   }
 
-  const messages = targets.map((to) => ({
-    to,
-    from: fromNumber,
-    body,
-    source: "aivox-dashboard",
-  }));
+  let sent = 0;
+  let failed = 0;
 
-  try {
-    console.log("Sending the SMS to the payload: ", messages);
-    const response = await client.post("/sms/send", { messages });
-    console.log("Response for SMS: ", response?.data?.data);
-    const responseCode = response?.data?.response_code;
-    if (responseCode && responseCode !== "SUCCESS") {
-      logger.warn("ClickSend SMS response not successful", {
-        responseCode,
-        responseMsg: response?.data?.response_msg,
-      });
-    }
-    return { sent: targets.length, failed: 0 };
-  } catch (error) {
-    logger.error("ClickSend SMS send failed", {
-      message: error?.message,
-      data: error?.response?.data,
-    });
-    return { sent: 0, failed: targets.length };
-  }
+  await Promise.all(
+    targets.map(async (to) => {
+      try {
+        const message = await client.messages.create({ to, from: fromNumber, body });
+        logger.info("Twilio SMS sent", { to, sid: message.sid, status: message.status, errorCode: message.errorCode, errorMessage: message.errorMessage });
+        sent++;
+      } catch (error) {
+        logger.error("Twilio SMS send failed", { to, message: error?.message, code: error?.code });
+        failed++;
+      }
+    })
+  );
+
+  return { sent, failed };
 };
 
 export const sendNewLeadSms = async (payload, recipients, options = {}) => {
@@ -157,11 +138,7 @@ export const sendPhoneVerificationSms = async (phone, code, options = {}) => {
   return sendSmsBatch([phone], body, options);
 };
 
-export const sendAppointmentConfirmationSms = async (
-  phone,
-  payload,
-  options = {}
-) => {
+export const sendAppointmentConfirmationSms = async (phone, payload, options = {}) => {
   if (!phone) {
     return { skipped: true };
   }
