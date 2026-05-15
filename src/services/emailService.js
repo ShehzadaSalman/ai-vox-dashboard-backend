@@ -54,3 +54,48 @@ export const sendEmailVerificationCode = async ({ to, code }) => {
   return sendEmail({ to, subject, text });
 };
 
+export const sendNewLeadEmail = async (payload, emailRecipients) => {
+  if (!emailRecipients || emailRecipients.length === 0) {
+    return { skipped: true };
+  }
+
+  const { name, phone, email, company, address, reason, agentName, visitTime } = payload;
+
+  const lines = [
+    `A new lead has been captured by agent ${agentName || "unknown"}.`,
+    "",
+    `Name:    ${name || "—"}`,
+    `Phone:   ${phone || "—"}`,
+    `Email:   ${email || "—"}`,
+    `Company: ${company || "—"}`,
+    `Address: ${address || "—"}`,
+    `Reason:  ${reason || "—"}`,
+    `Visit:   ${visitTime ? new Date(visitTime).toLocaleString() : "—"}`,
+  ];
+
+  const text = lines.join("\n");
+
+  const html = `
+    <h2 style="margin:0 0 12px">New Lead — ${name || "Unknown"}</h2>
+    <table style="border-collapse:collapse;font-size:14px">
+      <tr><td style="padding:4px 12px 4px 0;color:#6b7280">Agent</td><td style="padding:4px 0"><strong>${agentName || "—"}</strong></td></tr>
+      <tr><td style="padding:4px 12px 4px 0;color:#6b7280">Name</td><td style="padding:4px 0">${name || "—"}</td></tr>
+      <tr><td style="padding:4px 12px 4px 0;color:#6b7280">Phone</td><td style="padding:4px 0">${phone || "—"}</td></tr>
+      <tr><td style="padding:4px 12px 4px 0;color:#6b7280">Email</td><td style="padding:4px 0">${email || "—"}</td></tr>
+      <tr><td style="padding:4px 12px 4px 0;color:#6b7280">Company</td><td style="padding:4px 0">${company || "—"}</td></tr>
+      <tr><td style="padding:4px 12px 4px 0;color:#6b7280">Address</td><td style="padding:4px 0">${address || "—"}</td></tr>
+      <tr><td style="padding:4px 12px 4px 0;color:#6b7280">Reason</td><td style="padding:4px 0">${reason || "—"}</td></tr>
+      <tr><td style="padding:4px 12px 4px 0;color:#6b7280">Visit Time</td><td style="padding:4px 0">${visitTime ? new Date(visitTime).toLocaleString() : "—"}</td></tr>
+    </table>
+  `.trim();
+
+  const results = await Promise.allSettled(
+    emailRecipients.map((to) =>
+      sendEmail({ to, subject: `New Lead: ${name || "Unknown"}`, text, html })
+    )
+  );
+
+  const sent = results.filter((r) => r.status === "fulfilled" && r.value?.sent).length;
+  return { sent, total: emailRecipients.length };
+};
+

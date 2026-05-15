@@ -14,6 +14,7 @@ import {
   sendAppointmentPush,
   sendAccountApprovedPush,
 } from "../services/pushNotificationService.js";
+import { sendNewLeadEmail } from "../services/emailService.js";
 import {
   asyncHandler,
   ValidationError,
@@ -908,6 +909,7 @@ router.post(
           user: {
             select: {
               id: true,
+              email: true,
               phone: true,
               phone_verified_at: true,
               status: true,
@@ -925,6 +927,10 @@ router.post(
 
       const pushRecipients = approvedUsers.map((u) => u.id);
 
+      const emailRecipients = approvedUsers
+        .filter((u) => u?.email)
+        .map((u) => u.email);
+
       const leadPayload = {
         name: value.name,
         email: value.email,
@@ -941,6 +947,7 @@ router.post(
       await Promise.allSettled([
         sendNewLeadSms(leadPayload, smsRecipients),
         sendNewLeadPush(leadPayload, pushRecipients),
+        sendNewLeadEmail(leadPayload, emailRecipients),
       ]);
     } catch (error) {
       logger.error("Failed to send lead notifications", { error: error.message });
