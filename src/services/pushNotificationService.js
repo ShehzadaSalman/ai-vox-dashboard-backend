@@ -25,7 +25,7 @@ const getOneSignalClient = () => {
   return { client, appId };
 };
 
-const sendPush = async ({ userIds, title, body, data = {} }) => {
+const sendPush = async ({ userIds, title, body, data = {}, url }) => {
   const context = getOneSignalClient();
   if (!context) return { skipped: true };
 
@@ -42,6 +42,7 @@ const sendPush = async ({ userIds, title, body, data = {} }) => {
       headings: { en: title },
       contents: { en: body },
       data,
+      ...(url ? { url } : {}),
     });
 
     const { id, recipients } = response.data;
@@ -57,11 +58,13 @@ const sendPush = async ({ userIds, title, body, data = {} }) => {
 };
 
 export const sendNewLeadPush = async (payload, userIds) => {
+  const dashboardUrl = process.env.DASHBOARD_URL || "https://candibly.vercel.app";
   return sendPush({
     userIds,
     title: "New Lead",
     body: `${payload.name || "A new lead"} has been captured${payload.agentName ? ` for ${payload.agentName}` : ""}.`,
     data: { type: "new_lead", leadId: payload.id },
+    url: `${dashboardUrl}/leads`,
   });
 };
 
