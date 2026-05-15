@@ -51,7 +51,7 @@ const buildAppointmentMessage = (payload) => {
 };
 
 const buildAccountApprovedMessage = () =>
-  "Your account has been approved with Candibly. Please login at: https://aivox-dashboard.vercel.app/";
+  "Your account has been approved with Candibly. Please login at: https://candibly.vercel.app/";
 
 const getTwilioClient = () => {
   const accountSid = process.env.TWILIO_ACCOUNT_SID;
