@@ -1,6 +1,6 @@
 import { validationResult } from "express-validator";
 import { calcomService } from "../services/calcomService.js";
-import { sendAppointmentConfirmationSms } from "../services/smsService.js";
+import { sendAppointmentConfirmationEmail } from "../services/emailService.js";
 import { prisma } from "../lib/database.js";
 import { logger } from "../lib/logger.js";
 
@@ -129,7 +129,7 @@ export const calcomController = {
       const apiKey = await getUserCalcomKey(req.user.id);
       const reservation = await calcomService.reserveSlot(apiKey, req.body);
       try {
-        const phone = req.body?.metadata?.phone;
+        const attendeeEmail = req.body?.attendee?.email;
         const attendeeName = req.body?.attendee?.name || "there";
         const visitTime =
           reservation?.eventDetails?.start || req.body?.start;
@@ -149,25 +149,14 @@ export const calcomController = {
             : calLinkRaw
               ? `https://cal.com/${calLinkRaw.replace(/^\/+/, "")}`
               : "";
-        const smsIntegration = await prisma.integration.findUnique({
-          where: {
-            user_id_provider: {
-              user_id: req.user.id,
-              provider: "sms",
-            },
-          },
-        });
-        const defaultCountryCode = smsIntegration?.config?.defaultCountryCode;
-        await sendAppointmentConfirmationSms(phone, {
+        await sendAppointmentConfirmationEmail(attendeeEmail, {
           name: attendeeName,
           visitTime,
           calLink,
-        }, {
-          defaultCountryCode,
         });
-      } catch (smsError) {
-        logger.warn("Failed to send appointment confirmation SMS", {
-          message: smsError?.message,
+      } catch (emailError) {
+        logger.warn("Failed to send appointment confirmation email", {
+          message: emailError?.message,
           leadId: req.body?.metadata?.leadId,
         });
       }

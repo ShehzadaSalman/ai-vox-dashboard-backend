@@ -99,3 +99,43 @@ export const sendNewLeadEmail = async (payload, emailRecipients) => {
   return { sent, total: emailRecipients.length };
 };
 
+export const sendAppointmentConfirmationEmail = async (email, payload) => {
+  if (!email) {
+    return { skipped: true };
+  }
+
+  const { name, visitTime, calLink } = payload;
+  const formattedTime = visitTime ? new Date(visitTime).toLocaleString() : "N/A";
+  const linkLine = calLink
+    ? `If you'd like to reschedule, you can do so at: ${calLink}`
+    : "";
+
+  const text = [
+    `Hey ${name || "there"}, your appointment has been confirmed at ${formattedTime}.`,
+    linkLine,
+  ]
+    .filter(Boolean)
+    .join("\n");
+
+  const html = `
+    <p>Hey <strong>${name || "there"}</strong>, your appointment has been confirmed at <strong>${formattedTime}</strong>.</p>
+    ${calLink ? `<p>If you'd like to reschedule, you can do so at: <a href="${calLink}">${calLink}</a></p>` : ""}
+  `.trim();
+
+  return sendEmail({ to: email, subject: "Your Appointment is Confirmed", text, html });
+};
+
+export const sendAccountApprovedEmail = async (email) => {
+  if (!email) {
+    return { skipped: true };
+  }
+
+  const text = "Your account has been approved with Candibly. Please login at: https://candibly.vercel.app/";
+  const html = `
+    <p>Your account has been approved with Candibly.</p>
+    <p><a href="https://candibly.vercel.app/">Click here to login</a></p>
+  `.trim();
+
+  return sendEmail({ to: email, subject: "Your Candibly Account is Approved", text, html });
+};
+

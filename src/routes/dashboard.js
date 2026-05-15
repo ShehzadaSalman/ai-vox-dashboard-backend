@@ -5,16 +5,15 @@ import { retellAPI } from "../lib/retell.js";
 import { logger } from "../lib/logger.js";
 import { calcomService } from "../services/calcomService.js";
 import {
-  sendNewLeadSms,
-  sendAppointmentConfirmationSms,
-  sendAccountApprovedSms,
-} from "../services/smsService.js";
-import {
   sendNewLeadPush,
   sendAppointmentPush,
   sendAccountApprovedPush,
 } from "../services/pushNotificationService.js";
-import { sendNewLeadEmail } from "../services/emailService.js";
+import {
+  sendNewLeadEmail,
+  sendAppointmentConfirmationEmail,
+  sendAccountApprovedEmail,
+} from "../services/emailService.js";
 import {
   asyncHandler,
   ValidationError,
@@ -921,10 +920,6 @@ router.post(
         .map((a) => a.user)
         .filter((u) => u?.status === "APPROVED");
 
-      const smsRecipients = approvedUsers
-        .filter((u) => u?.phone && u?.phone_verified_at)
-        .map((u) => u.phone);
-
       const pushRecipients = approvedUsers.map((u) => u.id);
 
       const emailRecipients = approvedUsers
@@ -945,7 +940,6 @@ router.post(
       };
 
       await Promise.allSettled([
-        sendNewLeadSms(leadPayload, smsRecipients),
         sendNewLeadPush(leadPayload, pushRecipients),
         sendNewLeadEmail(leadPayload, emailRecipients),
       ]);
@@ -1019,19 +1013,9 @@ router.post(
             : calLinkRaw
               ? `https://cal.com/${calLinkRaw.replace(/^\/+/, "")}`
               : "";
-        const smsIntegration = await prisma.integration.findUnique({
-          where: {
-            user_id_provider: {
-              user_id: userId,
-              provider: "sms",
-            },
-          },
-        });
-        const defaultCountryCode = smsIntegration?.config?.defaultCountryCode;
-
         const appointmentPayload = { name: value.name, visitTime: bookingStart, calLink };
         await Promise.allSettled([
-          sendAppointmentConfirmationSms(value.phone, appointmentPayload, { defaultCountryCode }),
+          sendAppointmentConfirmationEmail(value.email, appointmentPayload),
           sendAppointmentPush(value.phone, appointmentPayload, [userId]),
         ]);
       }
@@ -2151,25 +2135,15 @@ router.post(
       },
     });
 
-    const smsIntegration = await prisma.integration.findUnique({
-      where: {
-        user_id_provider: {
-          user_id: req.user.id,
-          provider: "sms",
-        },
-      },
-    });
-    const defaultCountryCode = smsIntegration?.config?.defaultCountryCode;
-
-    const [smsSettled, pushSettled] = await Promise.allSettled([
-      sendAccountApprovedSms(existing.phone, { defaultCountryCode }),
+    const [emailSettled, pushSettled] = await Promise.allSettled([
+      sendAccountApprovedEmail(existing.email),
       sendAccountApprovedPush(existing.id),
     ]);
 
-    const smsResult = smsSettled.status === "fulfilled" ? smsSettled.value : { failed: 1, error: smsSettled.reason?.message };
+    const emailResult = emailSettled.status === "fulfilled" ? emailSettled.value : { sent: false, error: emailSettled.reason?.message };
     const pushResult = pushSettled.status === "fulfilled" ? pushSettled.value : { failed: 1, error: pushSettled.reason?.message };
 
-    res.json({ success: true, data: updated, sms: smsResult, push: pushResult });
+    res.json({ success: true, data: updated, email: emailResult, push: pushResult });
   })
 );
 
