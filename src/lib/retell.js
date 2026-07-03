@@ -208,14 +208,111 @@ class RetellAPI {
    */
   async getAgentById(agentId) {
     try {
-      const response = await this.client.get(`/agents/${agentId}`);
-      return response.data;
+      return await this.sdk.agent.retrieve(agentId);
     } catch (error) {
       logger.error("Failed to fetch agent by ID", {
         agentId,
         error: error.message,
       });
       throw new Error(`Failed to fetch agent ${agentId}: ${error.message}`);
+    }
+  }
+
+  /**
+   * Retrieve a Retell LLM (holds the prompt + knowledge base links)
+   */
+  async getLlm(llmId) {
+    try {
+      return await this.sdk.llm.retrieve(llmId);
+    } catch (error) {
+      logger.error("Failed to fetch LLM", { llmId, error: error.message });
+      throw new Error(`Failed to fetch LLM ${llmId}: ${error.message}`);
+    }
+  }
+
+  /**
+   * Update a Retell LLM (prompt and/or attached knowledge bases)
+   */
+  async updateLlm(llmId, params) {
+    try {
+      return await this.sdk.llm.update(llmId, params);
+    } catch (error) {
+      logger.error("Failed to update LLM", { llmId, error: error.message });
+      throw new Error(`Failed to update LLM ${llmId}: ${error.message}`);
+    }
+  }
+
+  /**
+   * Publish the latest draft version of an agent
+   */
+  async publishAgent(agentId) {
+    try {
+      return await this.sdk.agent.publish(agentId);
+    } catch (error) {
+      // Retell's publish-agent endpoint returns an empty body on success (2xx),
+      // but the SDK tries to JSON-parse it and throws "Unexpected end of JSON
+      // input" / "invalid json response body". That parse error means the
+      // publish actually succeeded, so treat it as success.
+      const message = error?.message || "";
+      const isEmptyBodyParseError =
+        error?.status === undefined &&
+        /unexpected end of json input|invalid json response body/i.test(message);
+      if (isEmptyBodyParseError) {
+        return { success: true, agent_id: agentId };
+      }
+      logger.error("Failed to publish agent", { agentId, error: message });
+      throw new Error(`Failed to publish agent ${agentId}: ${message}`);
+    }
+  }
+
+  /**
+   * Knowledge base operations
+   */
+  async createKnowledgeBase(params) {
+    try {
+      return await this.sdk.knowledgeBase.create(params);
+    } catch (error) {
+      logger.error("Failed to create knowledge base", { error: error.message });
+      throw new Error(`Failed to create knowledge base: ${error.message}`);
+    }
+  }
+
+  async getKnowledgeBase(knowledgeBaseId) {
+    try {
+      return await this.sdk.knowledgeBase.retrieve(knowledgeBaseId);
+    } catch (error) {
+      logger.error("Failed to fetch knowledge base", {
+        knowledgeBaseId,
+        error: error.message,
+      });
+      throw new Error(
+        `Failed to fetch knowledge base ${knowledgeBaseId}: ${error.message}`
+      );
+    }
+  }
+
+  async addKnowledgeBaseSources(knowledgeBaseId, params) {
+    try {
+      return await this.sdk.knowledgeBase.addSources(knowledgeBaseId, params);
+    } catch (error) {
+      logger.error("Failed to add knowledge base sources", {
+        knowledgeBaseId,
+        error: error.message,
+      });
+      throw new Error(`Failed to add knowledge base sources: ${error.message}`);
+    }
+  }
+
+  async deleteKnowledgeBaseSource(knowledgeBaseId, sourceId) {
+    try {
+      return await this.sdk.knowledgeBase.deleteSource(knowledgeBaseId, sourceId);
+    } catch (error) {
+      logger.error("Failed to delete knowledge base source", {
+        knowledgeBaseId,
+        sourceId,
+        error: error.message,
+      });
+      throw new Error(`Failed to delete knowledge base source: ${error.message}`);
     }
   }
 }

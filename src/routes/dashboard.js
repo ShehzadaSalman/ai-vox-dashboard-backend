@@ -3,6 +3,8 @@ import Joi from "joi";
 import { prisma } from "../lib/database.js";
 import { retellAPI } from "../lib/retell.js";
 import { logger } from "../lib/logger.js";
+import { syncAgents } from "../services/agentSyncService.js";
+import { compilePrompt, emptyStructuredConfig } from "../lib/promptTemplate.js";
 import { calcomService } from "../services/calcomService.js";
 import {
   sendNewLeadPush,
@@ -128,6 +130,10 @@ const callsListSchema = Joi.object({
   offset: Joi.number().integer().min(0).default(0),
   agentId: Joi.string().optional(),
   callStatus: Joi.string().optional(),
+  success: Joi.boolean().truthy("true").falsy("false").optional(),
+  afterStart: Joi.number().integer().min(0).optional(),
+  beforeStart: Joi.number().integer().min(0).optional(),
+  search: Joi.string().max(100).optional().allow(""),
   sortBy: Joi.string().valid("date", "duration", "cost").default("date"),
   includeCount: Joi.boolean().truthy("true").falsy("false").default(true),
 });
@@ -208,6 +214,10 @@ const leadStatusMap = {
   contacted: "CONTACTED",
   qualified: "QUALIFIED",
 };
+
+const leadUpdateSchema = Joi.object({
+  status: Joi.string().valid("new", "contacted", "qualified").required(),
+});
 
 /**
  * POST /api/dashboard/sync-calls
@@ -767,78 +777,269 @@ router.delete(
  */
 router.post(
   "/sync-agents",
+  adminMiddleware,
   asyncHandler(async (req, res) => {
     logger.info("Starting agent sync from Retell API");
+    const result = await syncAgents();
+    res.json({
+      success: true,
+      message: "Agent sync completed",
+      agentsSynced: result.synced,
+      agentsUpdated: result.updated,
+      errors: result.errors,
+    });
+  })
+);
 
-    try {
-      const agents = normalizeRetellAgents(await retellAPI.getAgents());
-      logger.info(
-        `Retell agents response:\n${JSON.stringify(agents, null, 2)}`
-      );
+// ============================================
+// AGENT CONFIG (prompt + knowledge base)
+// ============================================
 
-      if (!agents || agents.length === 0) {
-        return res.json({
-          success: true,
-          message: "No agents found in Retell API",
-          agentsSynced: 0,
-        });
-      }
+const isAdminRole = (req) =>
+  req.user?.role === "ADMIN" || req.user?.role === "SUPERADMIN";
 
-      let syncedCount = 0;
-      let updatedCount = 0;
-      let errorCount = 0;
-
-      for (const agent of agents) {
-        try {
-          const agentName = agent.agent_name || `Agent ${agent.agent_id}`;
-          const result = await prisma.agent.upsert({
-            where: { agent_id: agent.agent_id },
-            update: {
-              agent_name: agentName,
-              status: agent.is_published ? "ACTIVE" : "INACTIVE",
-              updated_at: new Date(),
-            },
-            create: {
-              agent_id: agent.agent_id,
-              agent_name: agentName,
-              status: agent.is_published ? "ACTIVE" : "INACTIVE",
-            },
-          });
-
-          if (result.created_at.getTime() === result.updated_at.getTime()) {
-            syncedCount++;
-          } else {
-            updatedCount++;
-          }
-        } catch (agentError) {
-          logger.error("Error syncing agent", {
-            agentId: agent.agent_id,
-            error: agentError.message,
-          });
-          errorCount++;
-        }
-      }
-
-      logger.info("Agent sync completed", {
-        totalAgents: agents.length,
-        syncedCount,
-        updatedCount,
-        errorCount,
-      });
-
-      res.json({
-        success: true,
-        message: "Agent sync completed",
-        agentsSynced: syncedCount,
-        agentsUpdated: updatedCount,
-        errors: errorCount,
-      });
-    } catch (error) {
-      logger.error("Agent sync failed", {
-        error: error.message,
-      });
-      throw error;
+// Loads the local agent and enforces access: USER only reaches assigned agents.
+const loadAgentForRequest = async (req) => {
+  const { agentId } = req.params;
+  if (!agentId) {
+    throw new ValidationError("Agent ID is required");
+  }
+  const agent = await prisma.agent.findUnique({ where: { agent_id: agentId } });
+  if (!agent) {
+    throw new NotFoundError(`Agent with ID ${agentId} not found`);
+  }
+  if (req.user?.role === "USER") {
+    const assigned = await getAssignedAgentIds(req.user.id);
+    if (!assigned.includes(agentId)) {
+      throw new ForbiddenError("Access to agent not permitted");
     }
+  }
+  return agent;
+};
+
+// Resolves llm_id + response engine type from the live Retell agent, keeping the
+// local mirror in sync. Returns { liveAgent, llmId, engineType }.
+const resolveAgentEngine = async (agent) => {
+  const liveAgent = await retellAPI.getAgentById(agent.agent_id);
+  const engine = liveAgent?.response_engine || {};
+  const engineType = engine.type || agent.response_engine_type || null;
+  const llmId = engine.llm_id || agent.llm_id || null;
+  if (
+    engineType !== agent.response_engine_type ||
+    llmId !== agent.llm_id
+  ) {
+    await prisma.agent
+      .update({
+        where: { agent_id: agent.agent_id },
+        data: { response_engine_type: engineType, llm_id: llmId },
+      })
+      .catch(() => {});
+  }
+  return { liveAgent, llmId, engineType };
+};
+
+const isRetellLlmEngine = (engineType) =>
+  typeof engineType === "string" && engineType.includes("retell");
+
+/**
+ * GET /api/dashboard/agents/:agentId/config
+ * Live agent configuration (prompt, structured fields, KB, voice).
+ */
+router.get(
+  "/agents/:agentId/config",
+  asyncHandler(async (req, res) => {
+    const agent = await loadAgentForRequest(req);
+    const { liveAgent, llmId, engineType } = await resolveAgentEngine(agent);
+
+    let prompt = null;
+    let knowledgeBaseIds = [];
+    const editable = isRetellLlmEngine(engineType) && Boolean(llmId);
+    if (editable) {
+      const llm = await retellAPI.getLlm(llmId);
+      prompt = llm?.general_prompt || "";
+      knowledgeBaseIds = llm?.knowledge_base_ids || [];
+    }
+
+    res.json({
+      success: true,
+      data: {
+        agentId: agent.agent_id,
+        agentName: agent.agent_name,
+        status: agent.status,
+        responseEngineType: engineType,
+        editable,
+        editableReason: editable
+          ? null
+          : "Prompt editing is only available for Retell LLM agents.",
+        canEditRaw: isAdminRole(req),
+        prompt,
+        structuredConfig: agent.config || emptyStructuredConfig(),
+        knowledgeBaseId: agent.knowledge_base_id || knowledgeBaseIds[0] || null,
+        voiceId: liveAgent?.voice_id || null,
+        language: liveAgent?.language || null,
+        lastPublishedAt: agent.last_published_at,
+      },
+    });
+  })
+);
+
+/**
+ * PUT /api/dashboard/agents/:agentId/config
+ * Update the agent prompt (structured for clients, raw for admins) and publish.
+ */
+router.put(
+  "/agents/:agentId/config",
+  asyncHandler(async (req, res) => {
+    const agent = await loadAgentForRequest(req);
+    const { structuredConfig, rawPrompt, publish } = req.body || {};
+    const { llmId, engineType } = await resolveAgentEngine(agent);
+
+    if (!isRetellLlmEngine(engineType) || !llmId) {
+      throw new ValidationError(
+        "This agent's prompt cannot be edited from the dashboard."
+      );
+    }
+
+    let generalPrompt;
+    let configToStore = agent.config;
+
+    if (typeof rawPrompt === "string" && rawPrompt.trim()) {
+      if (!isAdminRole(req)) {
+        throw new ForbiddenError("Only admins can edit the raw prompt.");
+      }
+      generalPrompt = rawPrompt;
+    } else if (structuredConfig && typeof structuredConfig === "object") {
+      configToStore = { ...emptyStructuredConfig(), ...structuredConfig };
+      generalPrompt = compilePrompt(configToStore);
+    } else {
+      throw new ValidationError("Provide structuredConfig or rawPrompt.");
+    }
+
+    await retellAPI.updateLlm(llmId, { general_prompt: generalPrompt });
+
+    let lastPublishedAt = agent.last_published_at;
+    if (publish) {
+      await retellAPI.publishAgent(agent.agent_id);
+      lastPublishedAt = new Date();
+    }
+
+    await prisma.agent.update({
+      where: { agent_id: agent.agent_id },
+      data: {
+        config: configToStore,
+        llm_id: llmId,
+        response_engine_type: engineType,
+        last_published_at: lastPublishedAt,
+      },
+    });
+
+    res.json({
+      success: true,
+      data: {
+        prompt: generalPrompt,
+        structuredConfig: configToStore,
+        published: Boolean(publish),
+        lastPublishedAt,
+      },
+    });
+  })
+);
+
+/**
+ * GET /api/dashboard/agents/:agentId/knowledge-base
+ */
+router.get(
+  "/agents/:agentId/knowledge-base",
+  asyncHandler(async (req, res) => {
+    const agent = await loadAgentForRequest(req);
+    if (!agent.knowledge_base_id) {
+      return res.json({ success: true, data: null });
+    }
+    const kb = await retellAPI.getKnowledgeBase(agent.knowledge_base_id);
+    res.json({ success: true, data: kb });
+  })
+);
+
+/**
+ * POST /api/dashboard/agents/:agentId/knowledge-base
+ * Create a knowledge base for the agent and attach it to the LLM.
+ */
+router.post(
+  "/agents/:agentId/knowledge-base",
+  asyncHandler(async (req, res) => {
+    const agent = await loadAgentForRequest(req);
+    if (agent.knowledge_base_id) {
+      throw new ValidationError("A knowledge base already exists for this agent.");
+    }
+    const { llmId, engineType } = await resolveAgentEngine(agent);
+    if (!isRetellLlmEngine(engineType) || !llmId) {
+      throw new ValidationError("Knowledge base requires a Retell LLM agent.");
+    }
+
+    const { texts, urls } = req.body || {};
+    const kb = await retellAPI.createKnowledgeBase({
+      knowledge_base_name: `${agent.agent_name} KB`,
+      ...(Array.isArray(texts) && texts.length > 0 && { knowledge_base_texts: texts }),
+      ...(Array.isArray(urls) && urls.length > 0 && { knowledge_base_urls: urls }),
+    });
+
+    const kbId = kb?.knowledge_base_id || kb?.id;
+    const llm = await retellAPI.getLlm(llmId);
+    const existingIds = llm?.knowledge_base_ids || [];
+    await retellAPI.updateLlm(llmId, {
+      knowledge_base_ids: [...new Set([...existingIds, kbId])],
+    });
+
+    await prisma.agent.update({
+      where: { agent_id: agent.agent_id },
+      data: { knowledge_base_id: kbId },
+    });
+
+    res.json({ success: true, data: kb });
+  })
+);
+
+/**
+ * POST /api/dashboard/agents/:agentId/knowledge-base/sources
+ */
+router.post(
+  "/agents/:agentId/knowledge-base/sources",
+  asyncHandler(async (req, res) => {
+    const agent = await loadAgentForRequest(req);
+    if (!agent.knowledge_base_id) {
+      throw new ValidationError("No knowledge base to add sources to.");
+    }
+    const { texts, urls } = req.body || {};
+    if (
+      (!Array.isArray(texts) || texts.length === 0) &&
+      (!Array.isArray(urls) || urls.length === 0)
+    ) {
+      throw new ValidationError("Provide at least one text or url source.");
+    }
+    const kb = await retellAPI.addKnowledgeBaseSources(agent.knowledge_base_id, {
+      ...(Array.isArray(texts) && texts.length > 0 && { knowledge_base_texts: texts }),
+      ...(Array.isArray(urls) && urls.length > 0 && { knowledge_base_urls: urls }),
+    });
+    res.json({ success: true, data: kb });
+  })
+);
+
+/**
+ * DELETE /api/dashboard/agents/:agentId/knowledge-base/sources/:sourceId
+ */
+router.delete(
+  "/agents/:agentId/knowledge-base/sources/:sourceId",
+  asyncHandler(async (req, res) => {
+    const agent = await loadAgentForRequest(req);
+    if (!agent.knowledge_base_id) {
+      throw new ValidationError("No knowledge base for this agent.");
+    }
+    const { sourceId } = req.params;
+    const kb = await retellAPI.deleteKnowledgeBaseSource(
+      agent.knowledge_base_id,
+      sourceId
+    );
+    res.json({ success: true, data: kb });
   })
 );
 
@@ -1092,6 +1293,8 @@ router.get(
           reason: true,
           agent_name: true,
           status: true,
+          booked_at: true,
+          booking_uid: true,
           created_at: true,
           updated_at: true,
         },
@@ -1119,6 +1322,65 @@ router.get(
           offset,
           hasMore,
         },
+      },
+    });
+  })
+);
+
+/**
+ * PATCH /api/dashboard/leads/:leadId
+ * Update a lead's status (New -> Contacted -> Qualified)
+ */
+router.patch(
+  "/leads/:leadId",
+  asyncHandler(async (req, res) => {
+    const { leadId } = req.params;
+
+    if (!leadId) {
+      throw new ValidationError("Lead ID is required");
+    }
+
+    const { error, value } = leadUpdateSchema.validate(req.body);
+    if (error) {
+      throw new ValidationError(error.details[0].message);
+    }
+
+    const existing = await prisma.lead.findUnique({
+      where: { id: leadId },
+      select: { id: true },
+    });
+
+    if (!existing) {
+      throw new NotFoundError(`Lead with ID ${leadId} not found`);
+    }
+
+    const updated = await prisma.lead.update({
+      where: { id: leadId },
+      data: { status: leadStatusMap[value.status] },
+      select: {
+        id: true,
+        name: true,
+        email: true,
+        phone: true,
+        company: true,
+        address: true,
+        agent_id: true,
+        visit_time: true,
+        reason: true,
+        agent_name: true,
+        status: true,
+        booked_at: true,
+        booking_uid: true,
+        created_at: true,
+        updated_at: true,
+      },
+    });
+
+    res.json({
+      success: true,
+      data: {
+        ...updated,
+        status: updated.status ? updated.status.toLowerCase() : null,
       },
     });
   })
@@ -1171,7 +1433,18 @@ router.get(
       throw new ValidationError(error.details[0].message);
     }
 
-    const { limit, offset, agentId, callStatus, sortBy, includeCount } = value;
+    const {
+      limit,
+      offset,
+      agentId,
+      callStatus,
+      success,
+      afterStart,
+      beforeStart,
+      search,
+      sortBy,
+      includeCount,
+    } = value;
     const isUserScoped = req.user?.role === "USER";
     let assignedAgentIds = null;
     if (isUserScoped) {
@@ -1201,6 +1474,21 @@ router.get(
     }
     if (callStatus) {
       where.call_status = callStatus;
+    }
+    if (typeof success === "boolean") {
+      where.call_successful = success;
+    }
+    if (afterStart || beforeStart) {
+      where.start_timestamp = {};
+      if (afterStart) {
+        where.start_timestamp.gte = BigInt(afterStart);
+      }
+      if (beforeStart) {
+        where.start_timestamp.lte = BigInt(beforeStart);
+      }
+    }
+    if (search) {
+      where.caller_info = { contains: search, mode: "insensitive" };
     }
     if (assignedAgentIds && agentId && !assignedAgentIds.includes(agentId)) {
       throw new ForbiddenError("Access to agent not permitted");

@@ -128,6 +128,29 @@ export const calcomController = {
       handleValidation(req);
       const apiKey = await getUserCalcomKey(req.user.id);
       const reservation = await calcomService.reserveSlot(apiKey, req.body);
+
+      // Persist booking state on the originating lead so the "Booked" stamp
+      // and conversion metric survive a refresh.
+      const leadId = req.body?.metadata?.leadId;
+      if (leadId) {
+        try {
+          await prisma.lead.update({
+            where: { id: leadId },
+            data: {
+              booked_at: new Date(
+                reservation?.eventDetails?.start || req.body?.start || Date.now()
+              ),
+              booking_uid: reservation?.reservationId || null,
+            },
+          });
+        } catch (leadError) {
+          logger.warn("Failed to stamp lead as booked", {
+            message: leadError?.message,
+            leadId,
+          });
+        }
+      }
+
       try {
         const attendeeEmail = req.body?.attendee?.email;
         const attendeeName = req.body?.attendee?.name || "there";

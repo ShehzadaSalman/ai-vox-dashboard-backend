@@ -10,8 +10,29 @@ import {
   UnauthorizedError,
   ForbiddenError,
 } from "../middleware/errorHandler.js";
+import { authMiddleware } from "../middleware/auth.js";
 
 const router = express.Router();
+
+const SELF_USER_SELECT = {
+  id: true,
+  email: true,
+  name: true,
+  role: true,
+  status: true,
+  phone: true,
+  phone_verified_at: true,
+  created_at: true,
+};
+
+const profileUpdateSchema = Joi.object({
+  name: Joi.string().max(120).allow("").required(),
+});
+
+const passwordChangeSchema = Joi.object({
+  currentPassword: Joi.string().required(),
+  newPassword: Joi.string().min(8).max(128).required(),
+});
 
 const phoneSchema = Joi.string()
   .pattern(/^\+?[1-9]\d{6,14}$/)
@@ -431,6 +452,66 @@ router.get(
     } catch (e) {
       throw new UnauthorizedError("Invalid token");
     }
+  })
+);
+
+// Update the signed-in user's own profile (currently just their display name).
+router.patch(
+  "/me",
+  authMiddleware,
+  asyncHandler(async (req, res) => {
+    if (!req.user?.id) {
+      throw new UnauthorizedError("Authentication required");
+    }
+    const { error, value } = profileUpdateSchema.validate(req.body, {
+      abortEarly: false,
+      stripUnknown: true,
+    });
+    if (error) {
+      throw new ValidationError(error.details[0].message);
+    }
+    const name = value.name && value.name.trim() ? value.name.trim() : null;
+    const user = await prisma.user.update({
+      where: { id: req.user.id },
+      data: { name },
+      select: SELF_USER_SELECT,
+    });
+    res.json({ success: true, data: user });
+  })
+);
+
+// Change the signed-in user's password (requires their current password).
+router.post(
+  "/password/change",
+  authMiddleware,
+  asyncHandler(async (req, res) => {
+    if (!req.user?.id) {
+      throw new UnauthorizedError("Authentication required");
+    }
+    const { error, value } = passwordChangeSchema.validate(req.body);
+    if (error) {
+      throw new ValidationError(error.details[0].message);
+    }
+    const user = await prisma.user.findUnique({
+      where: { id: req.user.id },
+      select: { id: true, passwordHash: true },
+    });
+    if (!user) {
+      throw new UnauthorizedError("User not found");
+    }
+    const matches = await bcrypt.compare(value.currentPassword, user.passwordHash);
+    if (!matches) {
+      throw new ValidationError("Current password is incorrect");
+    }
+    if (value.currentPassword === value.newPassword) {
+      throw new ValidationError("New password must be different from the current one");
+    }
+    const passwordHash = await bcrypt.hash(value.newPassword, 12);
+    await prisma.user.update({
+      where: { id: user.id },
+      data: { passwordHash },
+    });
+    res.json({ success: true, message: "Password updated" });
   })
 );
 

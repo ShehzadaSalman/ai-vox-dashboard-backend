@@ -3,8 +3,9 @@ generator client {
 }
 
 datasource db {
-  provider = "postgresql"
-  url      = env("DATABASE_URL")
+  provider  = "postgresql"
+  url       = env("DATABASE_URL")
+  directUrl = env("DIRECT_URL")
 }
 
 model User {
@@ -30,14 +31,19 @@ model User {
 }
 
 model Agent {
-  id         String      @id @default(cuid())
-  agent_id   String      @unique
-  agent_name String
-  status     AgentStatus @default(ACTIVE)
-  created_at DateTime    @default(now())
-  updated_at DateTime    @updatedAt
-  calls      Call[]
-  assignments UserAgent[]
+  id                   String      @id @default(cuid())
+  agent_id             String      @unique
+  agent_name           String
+  status               AgentStatus @default(ACTIVE)
+  response_engine_type String?
+  llm_id               String?
+  knowledge_base_id    String?
+  config               Json?
+  last_published_at    DateTime?
+  created_at           DateTime    @default(now())
+  updated_at           DateTime    @updatedAt
+  calls                Call[]
+  assignments          UserAgent[]
 
   @@index([status])
   @@index([created_at])
@@ -96,9 +102,11 @@ model Lead {
   visit_time DateTime?
   reason     String?
   agent_name String?
-  status     LeadStatus @default(NEW)
-  created_at DateTime   @default(now())
-  updated_at DateTime   @updatedAt
+  status      LeadStatus @default(NEW)
+  booked_at   DateTime?
+  booking_uid String?
+  created_at  DateTime   @default(now())
+  updated_at  DateTime   @updatedAt
 
   @@index([agent_id])
   @@index([status])
