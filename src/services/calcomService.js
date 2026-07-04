@@ -36,10 +36,10 @@ const normalizeSlotTime = (slot) => {
   const start =
     slot.start || slot.startTime || slot.start_time || slot?.time?.start;
   const end = slot.end || slot.endTime || slot.end_time || slot?.time?.end;
-  if (!start || !end) {
+  if (!start) {
     return null;
   }
-  return { start, end, available: true };
+  return { start, end: end || null, available: true };
 };
 
 const flattenSlots = (slotsRaw) => {
@@ -101,16 +101,22 @@ export const calcomService = {
 
   async getAvailableSlots({ apiKey, eventTypeId, startTime, endTime, timeZone }) {
     const client = getClient(apiKey);
-    const response = await client.get("/slots/available", {
+    // Cal.com API v1 (/slots/available) is decommissioned (returns 410).
+    // Use the v2 slots endpoint, which requires its own api version.
+    const response = await client.get("/v2/slots", {
       params: {
         eventTypeId,
-        startTime,
-        endTime,
+        start: startTime,
+        end: endTime,
         timeZone,
+        format: "range",
+      },
+      headers: {
+        "cal-api-version": "2024-09-04",
       },
     });
     const slotsRaw =
-      response.data?.slots || response.data?.data?.slots || response.data?.data;
+      response.data?.data ?? response.data?.slots ?? response.data;
     return flattenSlots(slotsRaw);
   },
 

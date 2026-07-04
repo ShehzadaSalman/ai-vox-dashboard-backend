@@ -41,7 +41,6 @@
     "resend": "^6.12.3",
     "retell-sdk": "^4.66.0",
     "serverless-http": "^3.2.0",
-    "twilio": "^6.0.2",
     "winston": "^3.11.0"
   },
   "devDependencies": {
