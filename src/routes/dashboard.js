@@ -4,6 +4,7 @@ import { prisma } from "../lib/database.js";
 import { retellAPI } from "../lib/retell.js";
 import { logger } from "../lib/logger.js";
 import { syncAgents } from "../services/agentSyncService.js";
+import { reactivateAgent } from "../lib/planLimit.js";
 import { compilePrompt, emptyStructuredConfig } from "../lib/promptTemplate.js";
 import { calcomService } from "../services/calcomService.js";
 import {
@@ -182,11 +183,11 @@ const searchAgentsSchema = Joi.object({
 });
 
 const createLeadSchema = Joi.object({
-  name: Joi.string().max(200).required(),
+  name: Joi.string().max(200).optional().allow(null, ""),
   email: Joi.string().email().max(320).optional().allow(null, ""),
   phone: Joi.string().max(50).optional().allow(null, ""),
   company: Joi.string().max(200).optional().allow(null, ""),
-  address: Joi.string().max(500).required(),
+  address: Joi.string().max(500).optional().allow(null, ""),
   agentId: Joi.string().max(200).required(),
   visitTime: Joi.date().iso().optional().allow(null),
   reason: Joi.string().max(500).optional().allow(null, ""),
@@ -1070,7 +1071,7 @@ router.post(
 
     const lead = await prisma.lead.create({
       data: {
-        name: value.name,
+        name: normalizeOptionalValue(value.name) || "Unknown",
         email: normalizeOptionalValue(value.email),
         phone: normalizeOptionalValue(value.phone),
         company: normalizeOptionalValue(value.company),
@@ -2521,6 +2522,19 @@ router.post(
       },
     });
 
+    const assignedAgentIds = await getAssignedAgentIds(userId);
+    await Promise.all(
+      assignedAgentIds.map((agentId) =>
+        reactivateAgent(agentId).catch((error) => {
+          logger.error("Failed to reactivate agent after new plan assignment", {
+            agentId,
+            userId,
+            error: error.message,
+          });
+        })
+      )
+    );
+
     res.status(201).json({
       success: true,
       data: {
@@ -2621,6 +2635,14 @@ router.post(
 
     if (existingAssignment) {
       throw new ValidationError("Agent is already assigned to this user");
+    }
+
+    const existingAssignmentCount = await prisma.userAgent.count({
+      where: { user_id: userId },
+    });
+
+    if (existingAssignmentCount >= 1) {
+      throw new ValidationError("This user already has an agent assigned. A user can only be assigned one agent at a time.");
     }
 
     const assignment = await prisma.userAgent.create({

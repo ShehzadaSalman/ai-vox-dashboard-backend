@@ -266,6 +266,35 @@ class RetellAPI {
   }
 
   /**
+   * List all phone numbers (including which agent each is bound to)
+   */
+  async listPhoneNumbers() {
+    try {
+      return await this.sdk.phoneNumber.list();
+    } catch (error) {
+      logger.error("Failed to list phone numbers", { error: error.message });
+      throw new Error(`Failed to list phone numbers: ${error.message}`);
+    }
+  }
+
+  /**
+   * Update the agent(s) bound to a phone number. Pass null for
+   * inbound_agent_id/outbound_agent_id to stop that number from routing to
+   * any agent.
+   */
+  async updatePhoneNumber(phoneNumber, params) {
+    try {
+      return await this.sdk.phoneNumber.update(phoneNumber, params);
+    } catch (error) {
+      logger.error("Failed to update phone number", {
+        phoneNumber,
+        error: error.message,
+      });
+      throw new Error(`Failed to update phone number ${phoneNumber}: ${error.message}`);
+    }
+  }
+
+  /**
    * Knowledge base operations
    */
   async createKnowledgeBase(params) {

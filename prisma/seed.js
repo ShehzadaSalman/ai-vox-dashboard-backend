@@ -5,16 +5,22 @@ const prisma = new PrismaClient();
 async function main() {
   const plans = [
     {
+      code: "TRIAL",
+      name: "Free Trial",
+      monthly_minutes_limit: 20,
+      price_cents: 0
+    },
+    {
       code: "SILVER",
       name: "Silver",
-      monthly_minutes_limit: 500,
-      price_cents: 18000
+      monthly_minutes_limit: 300,
+      price_cents: 12900
     },
     {
       code: "GOLD",
       name: "Gold",
-      monthly_minutes_limit: 1200,
-      price_cents: 45000
+      monthly_minutes_limit: 900,
+      price_cents: 24900
     }
   ];
 

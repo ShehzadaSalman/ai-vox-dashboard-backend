@@ -2,6 +2,7 @@ import express from "express";
 import Joi from "joi";
 import bcrypt from "bcryptjs";
 import jwt from "jsonwebtoken";
+import rateLimit from "express-rate-limit";
 import { prisma } from "../lib/database.js";
 import { sendPasswordResetEmail, sendEmailVerificationCode } from "../services/emailService.js";
 import {
@@ -13,6 +14,42 @@ import {
 import { authMiddleware } from "../middleware/auth.js";
 
 const router = express.Router();
+
+// Brute-force protection for credential guessing (login).
+const loginLimiter = rateLimit({
+  windowMs: 15 * 60 * 1000,
+  max: 10,
+  standardHeaders: true,
+  legacyHeaders: false,
+  message: "Too many login attempts. Please try again in 15 minutes.",
+});
+
+// Prevents abuse of code-sending endpoints (email/SMS spam, account enumeration).
+const otpRequestLimiter = rateLimit({
+  windowMs: 15 * 60 * 1000,
+  max: 5,
+  standardHeaders: true,
+  legacyHeaders: false,
+  message: "Too many code requests. Please try again in 15 minutes.",
+});
+
+// Prevents brute-forcing the 6-digit verification code.
+const otpVerifyLimiter = rateLimit({
+  windowMs: 15 * 60 * 1000,
+  max: 10,
+  standardHeaders: true,
+  legacyHeaders: false,
+  message: "Too many attempts. Please try again in 15 minutes.",
+});
+
+// Limits automated account creation from a single IP.
+const registerLimiter = rateLimit({
+  windowMs: 60 * 60 * 1000,
+  max: 10,
+  standardHeaders: true,
+  legacyHeaders: false,
+  message: "Too many accounts created from this IP. Please try again later.",
+});
 
 const SELF_USER_SELECT = {
   id: true,
@@ -90,6 +127,7 @@ function signToken(payload) {
 
 router.post(
   "/register",
+  registerLimiter,
   asyncHandler(async (req, res) => {
     const { error, value } = registerSchema.validate(req.body, {
       abortEarly: false,
@@ -161,6 +199,25 @@ router.post(
       // Don't block registration if email fails
     }
 
+    try {
+      const trialPlan = await prisma.plan.findUnique({ where: { code: "TRIAL" } });
+      if (trialPlan) {
+        const now = new Date();
+        const periodEnd = new Date(now.getTime() + 30 * 24 * 60 * 60 * 1000);
+        await prisma.subscription.create({
+          data: {
+            user_id: user.id,
+            plan_id: trialPlan.id,
+            status: "active",
+            current_period_start: now,
+            current_period_end: periodEnd,
+          },
+        });
+      }
+    } catch (planError) {
+      // Don't block registration if trial plan assignment fails
+    }
+
     res.status(201).json({
       success: true,
       data: user,
@@ -172,6 +229,7 @@ router.post(
 
 router.post(
   "/phone/start",
+  otpRequestLimiter,
   asyncHandler(async (req, res) => {
     const { error, value } = phoneStartSchema.validate(req.body, {
       abortEarly: false,
@@ -224,6 +282,7 @@ router.post(
 
 router.post(
   "/phone/verify",
+  otpVerifyLimiter,
   asyncHandler(async (req, res) => {
     const { error, value } = phoneVerifySchema.validate(req.body, {
       abortEarly: false,
@@ -269,6 +328,7 @@ router.post(
 
 router.post(
   "/password/email/start",
+  otpRequestLimiter,
   asyncHandler(async (req, res) => {
     const { error, value } = passwordResetStartSchema.validate(req.body, {
       abortEarly: false,
@@ -309,6 +369,7 @@ router.post(
 
 router.post(
   "/password/email/verify",
+  otpVerifyLimiter,
   asyncHandler(async (req, res) => {
     const { error, value } = passwordResetVerifySchema.validate(req.body, {
       abortEarly: false,
@@ -342,6 +403,7 @@ router.post(
 
 router.post(
   "/password/email/complete",
+  otpVerifyLimiter,
   asyncHandler(async (req, res) => {
     const { error, value } = passwordResetCompleteSchema.validate(req.body, {
       abortEarly: false,
@@ -386,6 +448,7 @@ router.post(
 
 router.post(
   "/login",
+  loginLimiter,
   asyncHandler(async (req, res) => {
     const { error, value } = loginSchema.validate(req.body, {
       abortEarly: false,

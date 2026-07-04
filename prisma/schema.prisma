@@ -9,23 +9,23 @@ datasource db {
 }
 
 model User {
-  id           String     @id @default(cuid())
-  email        String     @unique
-  passwordHash String
-  name         String?
-  phone        String?
-  phone_verification_code String?
+  id                            String         @id @default(cuid())
+  email                         String         @unique
+  passwordHash                  String
+  name                          String?
+  phone                         String?
+  phone_verification_code       String?
   phone_verification_expires_at DateTime?
-  phone_verified_at DateTime?
-  password_reset_code String?
-  password_reset_expires_at DateTime?
-  created_at   DateTime   @default(now())
-  updated_at   DateTime   @updatedAt
-  role         UserRole   @default(USER)
-  status       UserStatus @default(APPROVED)
-  assignments  UserAgent[]
-  subscriptions Subscription[]
-  integrations Integration[]
+  phone_verified_at             DateTime?
+  password_reset_code           String?
+  password_reset_expires_at     DateTime?
+  created_at                    DateTime       @default(now())
+  updated_at                    DateTime       @updatedAt
+  role                          UserRole       @default(USER)
+  status                        UserStatus     @default(APPROVED)
+  assignments                   UserAgent[]
+  subscriptions                 Subscription[]
+  integrations                  Integration[]
 
   @@map("users")
 }
@@ -39,6 +39,7 @@ model Agent {
   llm_id               String?
   knowledge_base_id    String?
   config               Json?
+  paused_phone_numbers Json?
   last_published_at    DateTime?
   created_at           DateTime    @default(now())
   updated_at           DateTime    @updatedAt
@@ -92,16 +93,16 @@ model UserAgent {
 }
 
 model Lead {
-  id         String     @id @default(cuid())
-  name       String
-  email      String?
-  phone      String?
-  company    String?
-  address    String?
-  agent_id   String?
-  visit_time DateTime?
-  reason     String?
-  agent_name String?
+  id          String     @id @default(cuid())
+  name        String
+  email       String?
+  phone       String?
+  company     String?
+  address     String?
+  agent_id    String?
+  visit_time  DateTime?
+  reason      String?
+  agent_name  String?
   status      LeadStatus @default(NEW)
   booked_at   DateTime?
   booking_uid String?
@@ -115,15 +116,15 @@ model Lead {
 }
 
 model Plan {
-  id                     String   @id @default(cuid())
-  code                   String   @unique
-  name                   String
-  monthly_minutes_limit  Int
-  price_cents            Int
-  is_active              Boolean  @default(true)
-  created_at             DateTime @default(now())
-  updated_at             DateTime @updatedAt
-  subscriptions          Subscription[]
+  id                    String         @id @default(cuid())
+  code                  String         @unique
+  name                  String
+  monthly_minutes_limit Int
+  price_cents           Int
+  is_active             Boolean        @default(true)
+  created_at            DateTime       @default(now())
+  updated_at            DateTime       @updatedAt
+  subscriptions         Subscription[]
 
   @@index([code])
   @@index([is_active])

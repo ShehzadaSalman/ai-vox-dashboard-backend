@@ -1,6 +1,7 @@
 import express from "express";
 import { prisma } from "../lib/database.js";
 import { logger } from "../lib/logger.js";
+import { enforcePlanLimitForAgent } from "../lib/planLimit.js";
 
 const router = express.Router();
 
@@ -110,6 +111,8 @@ router.post("/retell", async (req, res) => {
       update: callData,
       create: callData,
     });
+
+    await enforcePlanLimitForAgent(callData.agent_id);
   } catch (error) {
     logger.error("Failed to store Retell call webhook", {
       event,
