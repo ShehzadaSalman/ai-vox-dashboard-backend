@@ -59,10 +59,28 @@ class RetellAPI {
   }
 
   /**
+   * Build a call-list filter_criteria.start_timestamp entry from simple
+   * lower/upper bound options, matching retell-sdk v5's structured filter DSL
+   * ({ op, type, value }) instead of the old { lower_threshold, upper_threshold }.
+   */
+  _buildStartTimestampFilter(startTimestamp, endTimestamp) {
+    if (startTimestamp && endTimestamp) {
+      return { op: "bt", type: "range", value: [startTimestamp, endTimestamp] };
+    }
+    if (startTimestamp) {
+      return { op: "ge", type: "number", value: startTimestamp };
+    }
+    if (endTimestamp) {
+      return { op: "le", type: "number", value: endTimestamp };
+    }
+    return undefined;
+  }
+
+  /**
    * Fetch calls from Retell API with pagination
    * @param {Object} options - Query options
    * @param {number} options.limit - Number of calls to fetch per page
-   * @param {string} options.startAfter - Call ID to start after (for pagination)
+   * @param {string} options.startAfter - Pagination cursor to start after
    * @param {number} options.startTimestamp - Start timestamp filter (Unix timestamp in seconds)
    * @param {number} options.endTimestamp - End timestamp filter (Unix timestamp in seconds)
    * @param {Object} options.filterCriteria - Additional Retell filter_criteria options
@@ -70,35 +88,24 @@ class RetellAPI {
    */
   async getCalls(options = {}) {
     try {
-      const filterCriteria =
-        options.startTimestamp || options.endTimestamp
-          ? {
-              start_timestamp: {
-                ...(options.startTimestamp && {
-                  lower_threshold: options.startTimestamp,
-                }),
-                ...(options.endTimestamp && {
-                  upper_threshold: options.endTimestamp,
-                }),
-              },
-            }
-          : {};
+      const startTimestampFilter = this._buildStartTimestampFilter(
+        options.startTimestamp,
+        options.endTimestamp
+      );
 
-      const mergedFilterCriteria = {
-        ...filterCriteria,
+      const filterCriteria = {
+        ...(startTimestampFilter && { start_timestamp: startTimestampFilter }),
         ...(options.filterCriteria || {}),
       };
 
-      const response = await this.client.post("/list-calls", {
+      const response = await this.sdk.call.list({
         limit: options.limit || 100,
         ...(options.startAfter && { pagination_key: options.startAfter }),
-        ...(Object.keys(mergedFilterCriteria).length > 0 && {
-          filter_criteria: mergedFilterCriteria,
+        ...(Object.keys(filterCriteria).length > 0 && {
+          filter_criteria: filterCriteria,
         }),
       });
-      const data = response.data;
-      const calls = Array.isArray(data) ? data : data?.calls || [];
-      console.log("Retell call history response", calls);
+      const calls = response?.items || [];
       return calls;
     } catch (error) {
       logger.error("Failed to fetch calls from Retell API", {
@@ -185,12 +192,47 @@ class RetellAPI {
   }
 
   /**
-   * Fetch all agents from Retell API
-   * @returns {Promise<Array>} - Array of all agents
+   * Fetch all agents from Retell API, with full details (is_published,
+   * response_engine, last_modification_timestamp) per agent.
+   *
+   * retell-sdk v5's agent.list() only returns lightweight items (agent_id,
+   * agent_name, tags) — it no longer includes is_published/response_engine.
+   * So this paginates the list to collect every agent_id, then retrieves each
+   * one individually to rebuild the full shape our callers (agentSyncService,
+   * dashboard.js) expect.
+   * @returns {Promise<Array>} - Array of full agent details
    */
   async getAgents() {
     try {
-      return await this.sdk.agent.list();
+      const summaries = [];
+      let paginationKey;
+      let hasMore = true;
+
+      while (hasMore) {
+        const response = await this.sdk.agent.list({
+          limit: 1000,
+          ...(paginationKey && { pagination_key: paginationKey }),
+        });
+        summaries.push(...(response?.items || []));
+        hasMore = Boolean(response?.has_more && response?.pagination_key);
+        paginationKey = response?.pagination_key;
+      }
+
+      const fullAgents = await Promise.all(
+        summaries.map(async (summary) => {
+          try {
+            return await this.sdk.agent.retrieve(summary.agent_id);
+          } catch (error) {
+            logger.error("Failed to fetch agent detail during sync", {
+              agentId: summary.agent_id,
+              error: error.message,
+            });
+            return null;
+          }
+        })
+      );
+
+      return fullAgents.filter(Boolean);
     } catch (error) {
       logger.error("Failed to fetch agents from Retell API", {
         error: error.message,
@@ -243,16 +285,20 @@ class RetellAPI {
   }
 
   /**
-   * Publish the latest draft version of an agent
+   * Publish the latest draft version of an agent.
+   *
+   * retell-sdk v5 replaced the old "publish in place" endpoint with
+   * /publish-agent-version, which requires the specific draft version number
+   * to publish — so this looks up the agent's current version first.
    */
   async publishAgent(agentId) {
     try {
-      return await this.sdk.agent.publish(agentId);
+      const agent = await this.sdk.agent.retrieve(agentId);
+      return await this.sdk.agent.publish(agentId, { version: agent.version });
     } catch (error) {
-      // Retell's publish-agent endpoint returns an empty body on success (2xx),
-      // but the SDK tries to JSON-parse it and throws "Unexpected end of JSON
-      // input" / "invalid json response body". That parse error means the
-      // publish actually succeeded, so treat it as success.
+      // Retell's publish-agent endpoint used to return an empty body on
+      // success (2xx) that the old SDK version tried (and failed) to
+      // JSON-parse. Keep tolerating that shape defensively.
       const message = error?.message || "";
       const isEmptyBodyParseError =
         error?.status === undefined &&
@@ -266,11 +312,27 @@ class RetellAPI {
   }
 
   /**
-   * List all phone numbers (including which agent each is bound to)
+   * List all phone numbers (including which agent(s) each is bound to).
+   * retell-sdk v5 returns { has_more, items, pagination_key } instead of a
+   * bare array, and paginates — so this collects every page.
    */
   async listPhoneNumbers() {
     try {
-      return await this.sdk.phoneNumber.list();
+      const numbers = [];
+      let paginationKey;
+      let hasMore = true;
+
+      while (hasMore) {
+        const response = await this.sdk.phoneNumber.list({
+          limit: 1000,
+          ...(paginationKey && { pagination_key: paginationKey }),
+        });
+        numbers.push(...(response?.items || []));
+        hasMore = Boolean(response?.has_more && response?.pagination_key);
+        paginationKey = response?.pagination_key;
+      }
+
+      return numbers;
     } catch (error) {
       logger.error("Failed to list phone numbers", { error: error.message });
       throw new Error(`Failed to list phone numbers: ${error.message}`);
@@ -278,9 +340,25 @@ class RetellAPI {
   }
 
   /**
-   * Update the agent(s) bound to a phone number. Pass null for
-   * inbound_agent_id/outbound_agent_id to stop that number from routing to
-   * any agent.
+   * Retrieve a single phone number's current binding state.
+   */
+  async getPhoneNumber(phoneNumber) {
+    try {
+      return await this.sdk.phoneNumber.retrieve(phoneNumber);
+    } catch (error) {
+      logger.error("Failed to fetch phone number", {
+        phoneNumber,
+        error: error.message,
+      });
+      throw new Error(`Failed to fetch phone number ${phoneNumber}: ${error.message}`);
+    }
+  }
+
+  /**
+   * Update the agent(s) bound to a phone number. Callers pass the current
+   * retell-sdk v5 shape directly: { inbound_agents: [...], outbound_agents: [...] }
+   * (arrays of { agent_id, weight, agent_version }), not the old singular
+   * inbound_agent_id/outbound_agent_id fields.
    */
   async updatePhoneNumber(phoneNumber, params) {
     try {
@@ -332,9 +410,16 @@ class RetellAPI {
     }
   }
 
+  /**
+   * retell-sdk v5 changed this to deleteSource(sourceId, { knowledge_base_id }),
+   * swapped from the old deleteSource(knowledgeBaseId, sourceId). This wrapper
+   * keeps our own call sites (knowledgeBaseId, sourceId) unchanged.
+   */
   async deleteKnowledgeBaseSource(knowledgeBaseId, sourceId) {
     try {
-      return await this.sdk.knowledgeBase.deleteSource(knowledgeBaseId, sourceId);
+      return await this.sdk.knowledgeBase.deleteSource(sourceId, {
+        knowledge_base_id: knowledgeBaseId,
+      });
     } catch (error) {
       logger.error("Failed to delete knowledge base source", {
         knowledgeBaseId,

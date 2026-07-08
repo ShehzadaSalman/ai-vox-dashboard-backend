@@ -139,3 +139,41 @@ export const sendAccountApprovedEmail = async (email) => {
   return sendEmail({ to: email, subject: "Your Candibly Account is Approved", text, html });
 };
 
+export const sendPlanLimitReachedEmail = async (email, { planName, limitMinutes }) => {
+  if (!email) {
+    return { skipped: true };
+  }
+
+  const planLabel = planName || "your plan";
+  const limitLine = limitMinutes
+    ? ` (${limitMinutes} minutes/month)`
+    : "";
+
+  const text = [
+    `You've used up all the minutes included in ${planLabel}${limitLine}.`,
+    "Your AI agent has been paused and will stop answering calls until you upgrade.",
+    "Reach out to us to upgrade your plan and get your agent back online.",
+  ].join("\n");
+
+  const html = `
+    <p>You've used up all the minutes included in <strong>${planLabel}</strong>${limitLine}.</p>
+    <p>Your AI agent has been paused and will stop answering calls until you upgrade.</p>
+    <p>Reach out to us to upgrade your plan and get your agent back online.</p>
+  `.trim();
+
+  return sendEmail({ to: email, subject: "You've reached your plan limit — your agent has been paused", text, html });
+};
+
+export const sendOpsAlertEmail = async (subject, details) => {
+  const to = process.env.SUPERADMIN_EMAIL;
+  if (!to) {
+    return { skipped: true };
+  }
+
+  const text = Object.entries(details || {})
+    .map(([key, value]) => `${key}: ${value}`)
+    .join("\n");
+
+  return sendEmail({ to, subject: `[Candibly Alert] ${subject}`, text });
+};
+
